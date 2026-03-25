@@ -39,7 +39,7 @@ const logout = () => {
 
         <header class="site-header">
             <div class="container site-header__inner">
-                <div class="site-header__top">
+                <div class="site-header__bar">
                     <Link href="/" class="brand">
                         <span class="brand__badge">♫</span>
                         <span class="brand__text">
@@ -47,6 +47,21 @@ const logout = () => {
                             <small>Ваша музыка в одном месте</small>
                         </span>
                     </Link>
+
+                    <nav class="nav-desktop">
+                        <Link
+                            v-for="item in navigation"
+                            :key="item.href"
+                            v-show="!item.auth || user"
+                            :href="item.href"
+                            class="nav-link"
+                            :class="{ 'nav-link--active': isActive(item.href) }"
+                        >
+                            {{ item.label }}
+                        </Link>
+                    </nav>
+
+                    <SearchBox :initial-query="page.props.term ?? ''" class="site-search site-search--desktop" />
 
                     <div class="header-actions">
                         <template v-if="user">
@@ -70,20 +85,7 @@ const logout = () => {
                     </div>
                 </div>
 
-                <div class="site-header__bottom">
-                    <nav class="nav-desktop">
-                        <Link
-                            v-for="item in navigation"
-                            :key="item.href"
-                            v-show="!item.auth || user"
-                            :href="item.href"
-                            class="nav-link"
-                            :class="{ 'nav-link--active': isActive(item.href) }"
-                        >
-                            {{ item.label }}
-                        </Link>
-                    </nav>
-
+                <div class="site-header__mobile-search">
                     <SearchBox :initial-query="page.props.term ?? ''" class="site-search" />
                 </div>
             </div>

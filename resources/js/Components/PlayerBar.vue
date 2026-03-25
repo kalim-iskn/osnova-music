@@ -51,50 +51,54 @@ const volume = computed({
                 Выберите трек, чтобы начать прослушивание.
             </div>
 
-            <div class="player-bar__controls">
-                <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()">
-                    ⏮
-                </button>
+            <div class="player-bar__body">
+                <div class="player-bar__topline">
+                    <div class="player-bar__controls">
+                        <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()">
+                            ⏮
+                        </button>
 
-                <button
-                    class="player-button player-button--primary"
-                    type="button"
-                    :disabled="!currentTrack"
-                    @click="player.togglePlayback()"
-                >
-                    {{ player.isPlaying ? '❚❚' : '▶' }}
-                </button>
+                        <button
+                            class="player-button player-button--primary"
+                            type="button"
+                            :disabled="!currentTrack"
+                            @click="player.togglePlayback()"
+                        >
+                            {{ player.isPlaying ? '❚❚' : '▶' }}
+                        </button>
 
-                <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()">
-                    ⏭
-                </button>
-            </div>
+                        <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()">
+                            ⏭
+                        </button>
+                    </div>
 
-            <div class="player-bar__timeline">
-                <span>{{ formatSeconds(player.currentTime) }}</span>
+                    <div class="player-bar__secondary">
+                        <label class="volume-control">
+                            <span aria-hidden="true">🔊</span>
+                            <input v-model="volume" type="range" min="0" max="100" step="1" aria-label="Громкость">
+                        </label>
 
-                <input
-                    v-model="progress"
-                    type="range"
-                    min="0"
-                    :max="player.duration || currentTrack?.duration_seconds || 0"
-                    step="1"
-                    :disabled="!currentTrack"
-                >
+                        <button class="ghost-button ghost-button--small player-bar__queue-button" type="button" @click="player.toggleQueue()">
+                            Очередь
+                            <span class="badge">{{ player.queue.length }}</span>
+                        </button>
+                    </div>
+                </div>
 
-                <span>{{ formatSeconds(player.duration || currentTrack?.duration_seconds || 0) }}</span>
-            </div>
+                <div class="player-bar__timeline">
+                    <span>{{ formatSeconds(player.currentTime) }}</span>
 
-            <div class="player-bar__secondary">
-                <label class="volume-control">
-                    <span aria-hidden="true">🔊</span>
-                    <input v-model="volume" type="range" min="0" max="100" step="1" aria-label="Громкость">
-                </label>
+                    <input
+                        v-model="progress"
+                        type="range"
+                        min="0"
+                        :max="player.duration || currentTrack?.duration_seconds || 0"
+                        step="1"
+                        :disabled="!currentTrack"
+                    >
 
-                <button class="ghost-button ghost-button--small player-bar__queue-button" type="button" @click="player.toggleQueue()">
-                    Очередь
-                    <span class="badge">{{ player.queue.length }}</span>
-                </button>
+                    <span>{{ formatSeconds(player.duration || currentTrack?.duration_seconds || 0) }}</span>
+                </div>
             </div>
         </div>
     </div>

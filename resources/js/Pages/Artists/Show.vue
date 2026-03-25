@@ -1,16 +1,22 @@
 <script setup>
+import { computed } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import PaginationBar from '../../Components/PaginationBar.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { formatCount } from '../../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
 
-defineProps({
+const props = defineProps({
     artist: Object,
     albums: Array,
-    tracks: Array,
+    tracks: [Array, Object],
 });
+
+const trackItems = computed(() => Array.isArray(props.tracks) ? props.tracks : props.tracks?.data ?? []);
+const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tracks);
+const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.value.length);
 </script>
 
 <template>
@@ -33,12 +39,14 @@ defineProps({
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
                 <h2>Треки исполнителя</h2>
-                <span class="badge">{{ tracks.length }}</span>
+                <span class="badge">{{ totalTracks }}</span>
             </div>
 
             <div class="track-list">
-                <TrackRow v-for="track in tracks" :key="track.id" :track="track" :queue="tracks" :show-artist="false" />
+                <TrackRow v-for="track in trackItems" :key="track.id" :track="track" :queue="trackItems" :show-artist="false" />
             </div>
+
+            <PaginationBar :pagination="pagination" />
         </div>
 
         <div class="panel-card">

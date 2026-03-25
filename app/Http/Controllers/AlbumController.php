@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\AlbumResource;
 use App\Http\Resources\TrackResource;
 use App\Models\Album;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -19,11 +20,29 @@ class AlbumController extends Controller
             ->with(['artist', 'album'])
             ->orderByRaw('track_number IS NULL, track_number ASC')
             ->orderBy('id')
-            ->get();
+            ->paginate(20)
+            ->withQueryString();
 
         return Inertia::render('Albums/Show', [
             'album' => AlbumResource::make($album)->resolve(),
-            'tracks' => TrackResource::collection($tracks)->resolve(),
+            'tracks' => $this->resolveTracksPaginator($tracks),
         ]);
+    }
+
+    private function resolveTracksPaginator(LengthAwarePaginator $paginator): array
+    {
+        return [
+            'data' => TrackResource::collection($paginator->getCollection())->resolve(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+            'links' => [
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ];
     }
 }

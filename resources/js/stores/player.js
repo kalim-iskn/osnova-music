@@ -2,10 +2,13 @@ import { defineStore } from 'pinia';
 
 const STORAGE_KEY = 'waveflow-player';
 
+const resolvePlaybackUrl = (track) => track.playback_url ?? (track.id ? `/tracks/${track.id}/stream` : track.audio_url);
+
 const sanitizeTrack = (track) => ({
     id: track.id,
     title: track.title,
     audio_url: track.audio_url,
+    playback_url: resolvePlaybackUrl(track),
     cover_image_url: track.cover_image_url,
     duration_seconds: track.duration_seconds,
     duration_human: track.duration_human,
@@ -95,7 +98,7 @@ export const usePlayerStore = defineStore('player', {
             });
 
             if (this.currentTrack) {
-                this.audioElement.src = this.currentTrack.audio_url;
+                this.audioElement.src = this.currentTrack.playback_url ?? this.currentTrack.audio_url;
                 this.audioElement.currentTime = this.currentTime;
             }
         },
@@ -122,7 +125,7 @@ export const usePlayerStore = defineStore('player', {
 
             try {
                 const parsed = JSON.parse(raw);
-                this.queue = Array.isArray(parsed.queue) ? parsed.queue : [];
+                this.queue = Array.isArray(parsed.queue) ? parsed.queue.map(sanitizeTrack) : [];
                 this.currentIndex = Number.isInteger(parsed.currentIndex) ? parsed.currentIndex : -1;
                 this.currentTime = Number(parsed.currentTime || 0);
                 this.duration = Number(parsed.duration || 0);
@@ -180,7 +183,7 @@ export const usePlayerStore = defineStore('player', {
                 return;
             }
 
-            this.audioElement.src = track.audio_url;
+            this.audioElement.src = track.playback_url ?? track.audio_url;
             this.audioElement.currentTime = 0;
             this.currentTime = 0;
             this.duration = track.duration_seconds || 0;

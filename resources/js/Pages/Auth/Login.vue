@@ -32,11 +32,10 @@ const submit = () => {
         </div>
 
         <div class="auth-card">
-            <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Вход</span>
-                    <h2>Авторизация</h2>
-                </div>
+            <div class="auth-card__header">
+                <span class="eyebrow">Вход</span>
+                <h2>Авторизация</h2>
+                <p class="section-description">Введите email и пароль, чтобы открыть свою коллекцию.</p>
             </div>
 
             <form class="form-stack" @submit.prevent="submit">

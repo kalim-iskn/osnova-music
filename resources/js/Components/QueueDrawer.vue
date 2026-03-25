@@ -12,7 +12,7 @@ const player = usePlayerStore();
 
             <div class="queue-drawer__panel">
                 <div class="queue-drawer__header">
-                    <div>
+                    <div class="queue-drawer__heading">
                         <h3>Очередь воспроизведения</h3>
                         <p>{{ formatCount(player.queue.length, ['трек', 'трека', 'треков']) }}</p>
                     </div>
@@ -28,25 +28,32 @@ const player = usePlayerStore();
                 </div>
 
                 <div v-if="player.queue.length" class="queue-drawer__list">
-                    <button
+                    <div
                         v-for="(track, index) in player.queue"
                         :key="`${track.id}-${index}`"
-                        type="button"
                         class="queue-item"
                         :class="{ 'queue-item--active': player.currentIndex === index }"
-                        @click="player.playQueueItem(index)"
                     >
-                        <img :src="track.cover_image_url" :alt="track.title" class="queue-item__cover">
+                        <button type="button" class="queue-item__select" @click="player.playQueueItem(index)">
+                            <img :src="track.cover_image_url" :alt="track.title" class="queue-item__cover">
 
-                        <span class="queue-item__meta">
-                            <strong>{{ track.title }}</strong>
-                            <small>{{ track.artist.name }}</small>
-                        </span>
+                            <span class="queue-item__meta">
+                                <strong>{{ track.title }}</strong>
+                                <small>{{ track.artist.name }}</small>
+                            </span>
 
-                        <span class="queue-item__duration">{{ track.duration_human }}</span>
+                            <span class="queue-item__duration">{{ track.duration_human }}</span>
+                        </button>
 
-                        <span class="queue-item__remove" @click.stop="player.removeFromQueue(index)">✕</span>
-                    </button>
+                        <button
+                            type="button"
+                            class="queue-item__remove"
+                            aria-label="Убрать из очереди"
+                            @click="player.removeFromQueue(index)"
+                        >
+                            ✕
+                        </button>
+                    </div>
                 </div>
 
                 <div v-else class="empty-state empty-state--large">

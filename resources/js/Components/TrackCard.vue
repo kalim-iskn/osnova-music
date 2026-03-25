@@ -48,7 +48,7 @@ const addToQueue = () => {
             </div>
 
             <div class="track-card__footer">
-                <span>{{ track.duration_human }}</span>
+                <span class="track-card__duration">{{ track.duration_human }}</span>
 
                 <div class="track-card__actions">
                     <button type="button" class="icon-button" @click="addToQueue" aria-label="Добавить в очередь">

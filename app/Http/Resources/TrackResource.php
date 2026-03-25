@@ -10,13 +10,18 @@ class TrackResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $coverImageUrl = $this->cover_image_url
+            ?: $this->album?->cover_image_url
+            ?: $this->artist?->image_url;
+
         return [
             'id' => $this->id,
             'title' => $this->title,
             'duration_seconds' => $this->duration_seconds,
             'duration_human' => $this->duration_human,
             'audio_url' => $this->audio_url,
-            'cover_image_url' => $this->cover_image_url,
+            'playback_url' => route('tracks.stream', $this->resource),
+            'cover_image_url' => $coverImageUrl,
             'track_number' => $this->track_number,
             'is_downloaded' => (bool) $this->is_downloaded,
             'artist' => $this->whenLoaded('artist', fn () => [
