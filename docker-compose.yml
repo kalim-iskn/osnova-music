@@ -1,0 +1,52 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      APP_NAME: WaveFlow
+      APP_ENV: local
+      APP_KEY: base64:Jmr6qQ0P1mJ/BbErWlXzzl+1tXec94v6l0qYkZ1rN2g=
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      APP_LOCALE: ru
+      APP_FALLBACK_LOCALE: en
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: waveflow
+      DB_USERNAME: waveflow
+      DB_PASSWORD: waveflow
+      SESSION_DRIVER: database
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      FILESYSTEM_DISK: public
+      APP_SEED: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: waveflow
+      POSTGRES_USER: waveflow
+      POSTGRES_PASSWORD: waveflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waveflow -d waveflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
