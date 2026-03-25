@@ -33,19 +33,28 @@ const addToQueue = () => {
             <img :src="track.cover_image_url" :alt="track.title" class="track-card__cover">
             <button type="button" class="track-card__play" @click="play">▶</button>
         </div>
+
         <div class="track-card__body">
-            <div>
+            <div class="track-card__meta">
                 <h3 class="track-card__title">{{ track.title }}</h3>
+
                 <Link class="track-card__artist" :href="`/artists/${track.artist.slug}`">
                     {{ track.artist.name }}
                 </Link>
+
+                <p v-if="track.album" class="track-card__album">
+                    {{ track.album.title }}
+                </p>
             </div>
+
             <div class="track-card__footer">
                 <span>{{ track.duration_human }}</span>
+
                 <div class="track-card__actions">
-                    <button type="button" class="icon-button" @click="addToQueue">
+                    <button type="button" class="icon-button" @click="addToQueue" aria-label="Добавить в очередь">
                         <span aria-hidden="true">＋</span>
                     </button>
+
                     <LikeButton :track-id="track.id" icon-only />
                 </div>
             </div>

@@ -7,10 +7,6 @@ const props = defineProps({
         type: String,
         default: '',
     },
-    compact: {
-        type: Boolean,
-        default: false,
-    },
 });
 
 const query = ref(props.initialQuery);
@@ -33,16 +29,19 @@ const submit = () => {
 </script>
 
 <template>
-    <form class="search-box" :class="{ 'search-box--compact': compact }" @submit.prevent="submit">
-        <span class="search-box__icon">⌕</span>
+    <form class="search-box" @submit.prevent="submit">
+        <span class="search-box__icon" aria-hidden="true">⌕</span>
+
         <input
             v-model="query"
             type="search"
             name="q"
             class="search-box__input"
-            placeholder="Искать треки, артистов, альбомы"
+            placeholder="Искать треки, исполнителей и альбомы"
             autocomplete="off"
+            aria-label="Поиск по каталогу"
         >
+
         <button class="search-box__button" type="submit">Найти</button>
     </form>
 </template>

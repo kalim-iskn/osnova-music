@@ -45,21 +45,27 @@ const addToQueue = () => {
             <button type="button" class="track-row__title" @click="play">
                 {{ track.title }}
             </button>
+
             <div class="track-row__details">
                 <Link v-if="showArtist" :href="`/artists/${track.artist.slug}`">
                     {{ track.artist.name }}
                 </Link>
-                <template v-if="showArtist && showAlbum && track.album">·</template>
+
+                <template v-if="showArtist && showAlbum && track.album">
+                    <span class="track-row__separator">•</span>
+                </template>
+
                 <Link v-if="showAlbum && track.album" :href="`/albums/${track.album.slug}`">
                     {{ track.album.title }}
                 </Link>
+
                 <span v-if="!track.album">Сингл</span>
             </div>
         </div>
 
         <div class="track-row__actions">
             <span class="track-row__duration">{{ track.duration_human }}</span>
-            <button class="ghost-button ghost-button--small" type="button" @click="play">Играть</button>
+            <button class="ghost-button ghost-button--small" type="button" @click="play">Слушать</button>
             <button class="ghost-button ghost-button--small" type="button" @click="addToQueue">В очередь</button>
             <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
         </div>

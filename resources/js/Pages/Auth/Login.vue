@@ -1,12 +1,16 @@
 <script setup>
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
 defineOptions({ layout: AppLayout });
 
+const page = usePage();
+const appName = computed(() => page.props.appName ?? 'Музыка');
+
 const form = useForm({
-    email: 'demo@waveflow.local',
-    password: 'password',
+    email: '',
+    password: '',
     remember: true,
 });
 
@@ -16,42 +20,52 @@ const submit = () => {
 </script>
 
 <template>
-        <Head title="Войти" />
+    <Head title="Войти" />
 
-        <section class="auth-shell">
-            <div class="auth-card">
-                <div class="section-heading section-heading--tight">
-                    <div>
-                        <span class="eyebrow">Авторизация</span>
-                        <h1>Войти в WaveFlow</h1>
-                    </div>
+    <section class="auth-shell">
+        <div class="auth-panel">
+            <span class="eyebrow">Добро пожаловать</span>
+            <h1>С возвращением в {{ appName }}</h1>
+            <p>
+                Войдите в аккаунт, чтобы продолжить слушать музыку, управлять очередью и сохранять любимые треки.
+            </p>
+        </div>
+
+        <div class="auth-card">
+            <div class="section-heading section-heading--tight">
+                <div>
+                    <span class="eyebrow">Вход</span>
+                    <h2>Авторизация</h2>
                 </div>
-
-                <form class="form-stack" @submit.prevent="submit">
-                    <label class="form-field">
-                        <span>Email</span>
-                        <input v-model="form.email" type="email" autocomplete="email" required>
-                        <small v-if="form.errors.email" class="form-error">{{ form.errors.email }}</small>
-                    </label>
-
-                    <label class="form-field">
-                        <span>Пароль</span>
-                        <input v-model="form.password" type="password" autocomplete="current-password" required>
-                        <small v-if="form.errors.password" class="form-error">{{ form.errors.password }}</small>
-                    </label>
-
-                    <label class="checkbox-field">
-                        <input v-model="form.remember" type="checkbox">
-                        <span>Запомнить меня</span>
-                    </label>
-
-                    <button class="primary-button primary-button--wide" type="submit" :disabled="form.processing">Войти</button>
-                </form>
-
-                <p class="auth-footer">
-                    Ещё нет аккаунта?
-                    <Link href="/register">Создать</Link>
-                </p>
             </div>
-        </section>
+
+            <form class="form-stack" @submit.prevent="submit">
+                <label class="form-field">
+                    <span>Email</span>
+                    <input v-model="form.email" type="email" autocomplete="email" required placeholder="you@example.com">
+                    <small v-if="form.errors.email" class="form-error">{{ form.errors.email }}</small>
+                </label>
+
+                <label class="form-field">
+                    <span>Пароль</span>
+                    <input v-model="form.password" type="password" autocomplete="current-password" required placeholder="Введите пароль">
+                    <small v-if="form.errors.password" class="form-error">{{ form.errors.password }}</small>
+                </label>
+
+                <label class="checkbox-field">
+                    <input v-model="form.remember" type="checkbox">
+                    <span>Запомнить меня</span>
+                </label>
+
+                <button class="primary-button primary-button--wide" type="submit" :disabled="form.processing">
+                    Войти
+                </button>
+            </form>
+
+            <p class="auth-footer">
+                Ещё нет аккаунта?
+                <Link href="/register">Создать аккаунт</Link>
+            </p>
+        </div>
+    </section>
 </template>

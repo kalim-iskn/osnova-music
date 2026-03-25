@@ -6,6 +6,7 @@ import PlayerBar from '../Components/PlayerBar.vue';
 
 const page = usePage();
 
+const appName = computed(() => page.props.appName ?? 'Музыка');
 const user = computed(() => page.props.auth?.user ?? null);
 const flashMessage = computed(() => page.props.flash?.message ?? null);
 const currentUrl = computed(() => page.url || '/');
@@ -38,44 +39,52 @@ const logout = () => {
 
         <header class="site-header">
             <div class="container site-header__inner">
-                <Link href="/" class="brand">
-                    <span class="brand__badge">♫</span>
-                    <span>
-                        <strong>WaveFlow</strong>
-                        <small>Laravel music player</small>
-                    </span>
-                </Link>
-
-                <nav class="nav-desktop">
-                    <Link
-                        v-for="item in navigation"
-                        :key="item.href"
-                        v-show="!item.auth || user"
-                        :href="item.href"
-                        class="nav-link"
-                        :class="{ 'nav-link--active': isActive(item.href) }"
-                    >
-                        {{ item.label }}
+                <div class="site-header__top">
+                    <Link href="/" class="brand">
+                        <span class="brand__badge">♫</span>
+                        <span class="brand__text">
+                            <strong>{{ appName }}</strong>
+                            <small>Ваша музыка в одном месте</small>
+                        </span>
                     </Link>
-                </nav>
 
-                <SearchBox :initial-query="page.props.term ?? ''" compact class="site-search" />
-
-                <div class="header-actions">
-                    <template v-if="user">
-                        <div class="user-chip">
-                            <span class="user-chip__avatar">{{ user.name.slice(0, 1).toUpperCase() }}</span>
-                            <div>
-                                <strong>{{ user.name }}</strong>
-                                <small>{{ user.email }}</small>
+                    <div class="header-actions">
+                        <template v-if="user">
+                            <div class="user-chip">
+                                <span class="user-chip__avatar">{{ user.name.slice(0, 1).toUpperCase() }}</span>
+                                <div class="user-chip__meta">
+                                    <strong>{{ user.name }}</strong>
+                                    <small>{{ user.email }}</small>
+                                </div>
                             </div>
-                        </div>
-                        <button class="ghost-button" type="button" @click="logout">Выйти</button>
-                    </template>
-                    <template v-else>
-                        <Link href="/login" class="ghost-button">Войти</Link>
-                        <Link href="/register" class="primary-button">Регистрация</Link>
-                    </template>
+
+                            <button class="ghost-button ghost-button--small" type="button" @click="logout">
+                                Выйти
+                            </button>
+                        </template>
+
+                        <template v-else>
+                            <Link href="/login" class="ghost-button ghost-button--small">Войти</Link>
+                            <Link href="/register" class="primary-button primary-button--small">Регистрация</Link>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="site-header__bottom">
+                    <nav class="nav-desktop">
+                        <Link
+                            v-for="item in navigation"
+                            :key="item.href"
+                            v-show="!item.auth || user"
+                            :href="item.href"
+                            class="nav-link"
+                            :class="{ 'nav-link--active': isActive(item.href) }"
+                        >
+                            {{ item.label }}
+                        </Link>
+                    </nav>
+
+                    <SearchBox :initial-query="page.props.term ?? ''" class="site-search" />
                 </div>
             </div>
         </header>

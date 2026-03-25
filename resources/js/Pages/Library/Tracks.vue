@@ -20,33 +20,36 @@ const handleLikeChanged = (trackId, liked) => {
 </script>
 
 <template>
-        <Head title="Мои треки" />
+    <Head title="Мои треки" />
 
-        <section class="section-block">
-            <div class="section-heading">
-                <div>
-                    <span class="eyebrow">Коллекция</span>
-                    <h1>Мои треки</h1>
-                    <p>Все лайкнутые треки пользователя доступны в одном месте.</p>
-                </div>
-                <span class="badge badge--large">{{ likedTracks.length }}</span>
+    <section class="section-block">
+        <div class="section-heading">
+            <div>
+                <span class="eyebrow">Коллекция</span>
+                <h1>Мои треки</h1>
+                <p class="section-description">
+                    Всё, что вы отметили, хранится здесь — удобно возвращаться к любимой музыке в любой момент.
+                </p>
             </div>
 
-            <div class="panel-card">
-                <div v-if="likedTracks.length" class="track-list">
-                    <TrackRow
-                        v-for="track in likedTracks"
-                        :key="track.id"
-                        :track="track"
-                        :queue="likedTracks"
-                        @like-changed="(liked) => handleLikeChanged(track.id, liked)"
-                    />
-                </div>
+            <span class="badge badge--large">{{ likedTracks.length }}</span>
+        </div>
 
-                <div v-else class="empty-state empty-state--large">
-                    <p>Пока что у вас нет лайкнутых треков.</p>
-                    <Link href="/search" class="primary-button">Перейти к поиску</Link>
-                </div>
+        <div class="panel-card">
+            <div v-if="likedTracks.length" class="track-list">
+                <TrackRow
+                    v-for="track in likedTracks"
+                    :key="track.id"
+                    :track="track"
+                    :queue="likedTracks"
+                    @like-changed="(liked) => handleLikeChanged(track.id, liked)"
+                />
             </div>
-        </section>
+
+            <div v-else class="empty-state empty-state--large">
+                <p>Пока здесь пусто. Ставьте лайки понравившимся трекам, и они появятся в вашей коллекции.</p>
+                <Link href="/search" class="primary-button">Перейти к каталогу</Link>
+            </div>
+        </div>
+    </section>
 </template>

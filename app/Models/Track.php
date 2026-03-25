@@ -22,6 +22,7 @@ class Track extends Model
         'audio_url',
         'cover_image_url',
         'track_number',
+        'is_downloaded',
     ];
 
     protected function casts(): array
@@ -29,6 +30,7 @@ class Track extends Model
         return [
             'duration_seconds' => 'integer',
             'track_number' => 'integer',
+            'is_downloaded' => 'boolean',
         ];
     }
 

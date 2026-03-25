@@ -18,6 +18,7 @@ class TrackResource extends JsonResource
             'audio_url' => $this->audio_url,
             'cover_image_url' => $this->cover_image_url,
             'track_number' => $this->track_number,
+            'is_downloaded' => (bool) $this->is_downloaded,
             'artist' => $this->whenLoaded('artist', fn () => [
                 'id' => $this->artist->id,
                 'name' => $this->artist->name,
