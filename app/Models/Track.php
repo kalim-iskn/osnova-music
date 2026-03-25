@@ -23,6 +23,7 @@ class Track extends Model
         'cover_image_url',
         'track_number',
         'is_downloaded',
+        'plays_count',
     ];
 
     protected function casts(): array
@@ -31,6 +32,7 @@ class Track extends Model
             'duration_seconds' => 'integer',
             'track_number' => 'integer',
             'is_downloaded' => 'boolean',
+            'plays_count' => 'integer',
         ];
     }
 

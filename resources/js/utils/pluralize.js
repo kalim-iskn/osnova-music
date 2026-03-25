@@ -17,4 +17,8 @@ export const pluralize = (count, forms) => {
     return forms[2];
 };
 
+export const formatNumber = (count) => new Intl.NumberFormat('ru-RU').format(Number(count) || 0);
+
 export const formatCount = (count, forms) => `${count} ${pluralize(count, forms)}`;
+
+export const formatNumberedCount = (count, forms) => `${formatNumber(count)} ${pluralize(count, forms)}`;

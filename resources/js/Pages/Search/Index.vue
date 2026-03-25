@@ -2,7 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import TrackRow from '../../Components/TrackRow.vue';
-import { formatCount } from '../../utils/pluralize';
+import { formatCount, formatNumberedCount } from '../../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
 
@@ -60,6 +60,7 @@ defineProps({
                             <span class="entity-list__meta">
                                 <strong>{{ artist.name }}</strong>
                                 <small>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }}</small>
+                        <small>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</small>
                             </span>
                         </Link>
 

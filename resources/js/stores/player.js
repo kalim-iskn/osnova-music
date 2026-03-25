@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
+import { formatSeconds } from '../utils/time';
 
 const STORAGE_KEY = 'waveflow-player';
+const PLAY_REPORT_THRESHOLD = 8;
 
 const resolvePlaybackUrl = (track) => track.playback_url ?? (track.id ? `/tracks/${track.id}/stream` : track.audio_url);
 
@@ -10,8 +12,9 @@ const sanitizeTrack = (track) => ({
     audio_url: track.audio_url,
     playback_url: resolvePlaybackUrl(track),
     cover_image_url: track.cover_image_url,
-    duration_seconds: track.duration_seconds,
-    duration_human: track.duration_human,
+    duration_seconds: Number(track.duration_seconds || 0),
+    duration_human: track.duration_human ?? formatSeconds(track.duration_seconds || 0),
+    plays_count: Number(track.plays_count || 0),
     artist: track.artist,
     album: track.album,
 });
@@ -23,17 +26,20 @@ export const usePlayerStore = defineStore('player', {
         currentTime: 0,
         duration: 0,
         volume: 0.8,
+        previousVolume: 0.8,
         isPlaying: false,
         isQueueOpen: false,
         audioElement: null,
         initialized: false,
         listeners: null,
+        playReportedForCurrent: false,
     }),
 
     getters: {
         currentTrack: (state) => state.queue[state.currentIndex] ?? null,
         hasNext: (state) => state.currentIndex >= 0 && state.currentIndex < state.queue.length - 1,
         hasPrevious: (state) => state.currentIndex > 0,
+        isMuted: (state) => Number(state.volume) <= 0,
     },
 
     actions: {
@@ -49,7 +55,7 @@ export const usePlayerStore = defineStore('player', {
         attach(audioElement) {
             this.init();
 
-            if (this.audioElement === audioElement) {
+            if (!audioElement || this.audioElement === audioElement) {
                 return;
             }
 
@@ -64,7 +70,7 @@ export const usePlayerStore = defineStore('player', {
 
             this.listeners = {
                 loadedmetadata: () => {
-                    this.duration = Math.floor(this.audioElement?.duration || this.currentTrack?.duration_seconds || 0);
+                    this.updateDurationFromMedia();
 
                     if (this.currentTime > 0 && this.audioElement) {
                         this.audioElement.currentTime = this.currentTime;
@@ -72,9 +78,17 @@ export const usePlayerStore = defineStore('player', {
 
                     this.persist();
                 },
+                durationchange: () => {
+                    this.updateDurationFromMedia();
+                },
                 timeupdate: () => {
                     this.currentTime = Math.floor(this.audioElement?.currentTime || 0);
-                    this.duration = Math.floor(this.audioElement?.duration || this.duration || 0);
+                    this.updateDurationFromMedia();
+
+                    if (!this.playReportedForCurrent && this.currentTrack && this.currentTime >= PLAY_REPORT_THRESHOLD) {
+                        this.playReportedForCurrent = true;
+                        this.reportPlay(this.currentTrack.id);
+                    }
 
                     if (this.currentTime % 3 === 0) {
                         this.persist();
@@ -90,6 +104,9 @@ export const usePlayerStore = defineStore('player', {
                 },
                 ended: () => {
                     this.playNext();
+                },
+                error: async () => {
+                    await this.fallbackToDirectSource();
                 },
             };
 
@@ -110,6 +127,7 @@ export const usePlayerStore = defineStore('player', {
                 currentTime: this.currentTime,
                 duration: this.duration,
                 volume: this.volume,
+                previousVolume: this.previousVolume,
                 isPlaying: this.isPlaying,
             };
 
@@ -130,9 +148,25 @@ export const usePlayerStore = defineStore('player', {
                 this.currentTime = Number(parsed.currentTime || 0);
                 this.duration = Number(parsed.duration || 0);
                 this.volume = Number(parsed.volume || 0.8);
+                this.previousVolume = Number(parsed.previousVolume || this.volume || 0.8);
                 this.isPlaying = false;
             } catch {
                 localStorage.removeItem(STORAGE_KEY);
+            }
+        },
+
+        updateDurationFromMedia() {
+            const mediaDuration = Math.floor(this.audioElement?.duration || 0);
+            const resolvedDuration = mediaDuration || this.currentTrack?.duration_seconds || 0;
+
+            this.duration = resolvedDuration;
+
+            if (this.currentTrack && resolvedDuration > 0) {
+                this.queue[this.currentIndex] = {
+                    ...this.currentTrack,
+                    duration_seconds: resolvedDuration,
+                    duration_human: formatSeconds(resolvedDuration),
+                };
             }
         },
 
@@ -188,6 +222,7 @@ export const usePlayerStore = defineStore('player', {
             this.currentTime = 0;
             this.duration = track.duration_seconds || 0;
             this.audioElement.volume = this.volume;
+            this.playReportedForCurrent = false;
             this.persist();
 
             if (autoplay) {
@@ -200,12 +235,35 @@ export const usePlayerStore = defineStore('player', {
             }
         },
 
-        async togglePlayback() {
-            if (!this.currentTrack) {
+        async fallbackToDirectSource() {
+            const track = this.currentTrack;
+
+            if (!track || !this.audioElement || !track.audio_url) {
                 return;
             }
 
-            if (!this.audioElement) {
+            const currentSource = this.audioElement.currentSrc || this.audioElement.src || '';
+
+            if (currentSource.includes(track.audio_url)) {
+                this.isPlaying = false;
+                return;
+            }
+
+            this.audioElement.src = track.audio_url;
+            this.audioElement.currentTime = 0;
+            this.currentTime = 0;
+            this.playReportedForCurrent = false;
+
+            try {
+                await this.audioElement.play();
+                this.isPlaying = true;
+            } catch {
+                this.isPlaying = false;
+            }
+        },
+
+        async togglePlayback() {
+            if (!this.currentTrack || !this.audioElement) {
                 return;
             }
 
@@ -267,13 +325,29 @@ export const usePlayerStore = defineStore('player', {
         },
 
         setVolume(value) {
-            this.volume = Number(value || 0);
+            const normalizedVolume = Math.max(0, Math.min(1, Number(value || 0)));
+
+            if (normalizedVolume > 0) {
+                this.previousVolume = normalizedVolume;
+            }
+
+            this.volume = normalizedVolume;
 
             if (this.audioElement) {
-                this.audioElement.volume = this.volume;
+                this.audioElement.volume = normalizedVolume;
             }
 
             this.persist();
+        },
+
+        toggleMute() {
+            if (this.isMuted) {
+                this.setVolume(this.previousVolume > 0 ? this.previousVolume : 0.8);
+                return;
+            }
+
+            this.previousVolume = this.volume > 0 ? this.volume : this.previousVolume;
+            this.setVolume(0);
         },
 
         async playQueueItem(index) {
@@ -298,13 +372,12 @@ export const usePlayerStore = defineStore('player', {
                 this.currentTime = 0;
                 this.duration = 0;
                 this.isPlaying = false;
-
+                this.playReportedForCurrent = false;
                 if (this.audioElement) {
                     this.audioElement.pause();
                     this.audioElement.removeAttribute('src');
                     this.audioElement.load();
                 }
-
                 this.persist();
                 return;
             }
@@ -317,7 +390,6 @@ export const usePlayerStore = defineStore('player', {
                 if (this.currentIndex >= this.queue.length) {
                     this.currentIndex = this.queue.length - 1;
                 }
-
                 await this.loadCurrentTrack(this.isPlaying);
             }
 
@@ -330,18 +402,29 @@ export const usePlayerStore = defineStore('player', {
             this.currentTime = 0;
             this.duration = 0;
             this.isPlaying = false;
-
+            this.playReportedForCurrent = false;
             if (this.audioElement) {
                 this.audioElement.pause();
                 this.audioElement.removeAttribute('src');
                 this.audioElement.load();
             }
-
             this.persist();
         },
 
         toggleQueue() {
             this.isQueueOpen = !this.isQueueOpen;
+        },
+
+        async reportPlay(trackId) {
+            if (!trackId || !window.axios) {
+                return;
+            }
+
+            try {
+                await window.axios.post(`/tracks/${trackId}/play`);
+            } catch {
+                // noop
+            }
         },
     },
 });

@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { Head, Link, usePage } from '@inertiajs/vue3';
 import AppLayout from '../Layouts/AppLayout.vue';
 import TrackCard from '../Components/TrackCard.vue';
-import { formatCount } from '../utils/pluralize';
+import { formatCount, formatNumberedCount } from '../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
 
@@ -86,6 +86,7 @@ const appName = computed(() => page.props.appName ?? 'Музыка');
                     <span class="entity-list__meta">
                         <strong>{{ artist.name }}</strong>
                         <small>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }}</small>
+                        <small>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</small>
                     </span>
                 </Link>
             </div>

@@ -16,6 +16,7 @@ class ArtistResource extends JsonResource
             'slug' => $this->slug,
             'image_url' => $this->image_url,
             'tracks_count' => $this->whenCounted('tracks'),
+            'plays_count' => (int) ($this->plays_count ?? 0),
         ];
     }
 }

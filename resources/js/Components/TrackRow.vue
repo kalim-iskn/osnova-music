@@ -27,9 +27,15 @@ const emit = defineEmits(['like-changed']);
 const player = usePlayerStore();
 
 const active = computed(() => player.currentTrack?.id === props.track.id);
+const isPlaying = computed(() => active.value && player.isPlaying);
 
-const play = () => {
-    player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
+const toggleTrack = async () => {
+    if (active.value) {
+        await player.togglePlayback();
+        return;
+    }
+
+    await player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
 };
 
 const addToQueue = () => {
@@ -39,10 +45,12 @@ const addToQueue = () => {
 
 <template>
     <article class="track-row" :class="{ 'track-row--active': active }">
-        <img :src="track.cover_image_url" :alt="track.title" class="track-row__cover">
+        <button type="button" class="track-row__cover-button" @click="toggleTrack" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
+            <img :src="track.cover_image_url" :alt="track.title" class="track-row__cover">
+        </button>
 
         <div class="track-row__meta">
-            <button type="button" class="track-row__title" @click="play">
+            <button type="button" class="track-row__title" @click="toggleTrack">
                 {{ track.title }}
             </button>
 
@@ -64,10 +72,18 @@ const addToQueue = () => {
         </div>
 
         <div class="track-row__actions">
-            <span class="track-row__duration">{{ track.duration_human }}</span>
-            <button class="ghost-button ghost-button--small" type="button" @click="play">Слушать</button>
-            <button class="ghost-button ghost-button--small" type="button" @click="addToQueue">В очередь</button>
-            <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
+            <div class="track-row__lead-actions">
+                <button class="ghost-button ghost-button--small track-row__play-toggle" type="button" @click="toggleTrack">
+                    {{ isPlaying ? '❚❚' : '▶' }}
+                </button>
+                <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
+            </div>
+
+            <span class="track-row__duration">{{ active ? player.currentTrack?.duration_human ?? track.duration_human : track.duration_human }}</span>
+
+            <button class="ghost-button ghost-button--small track-row__queue-button" type="button" @click="addToQueue">
+                В очередь
+            </button>
         </div>
     </article>
 </template>

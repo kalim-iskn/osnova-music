@@ -38,6 +38,7 @@ class TrackSearchService
 
         return Artist::query()
             ->withCount('tracks')
+            ->withSum('tracks as plays_count', 'plays_count')
             ->when($term !== '', function ($query) use ($term) {
                 $query->where(fn ($subQuery) => $subQuery
                     ->where('name', 'ILIKE', "%{$term}%")

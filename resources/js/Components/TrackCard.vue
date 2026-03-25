@@ -17,22 +17,26 @@ const props = defineProps({
 
 const player = usePlayerStore();
 const active = computed(() => player.currentTrack?.id === props.track.id);
+const isPlaying = computed(() => active.value && player.isPlaying);
 
-const play = () => {
-    player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
-};
+const toggleTrack = async () => {
+    if (active.value) {
+        await player.togglePlayback();
+        return;
+    }
 
-const addToQueue = () => {
-    player.addToQueue(props.track);
+    await player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
 };
 </script>
 
 <template>
     <article class="track-card" :class="{ 'track-card--active': active }">
-        <div class="track-card__media">
+        <button type="button" class="track-card__media track-card__media-button" @click="toggleTrack">
             <img :src="track.cover_image_url" :alt="track.title" class="track-card__cover">
-            <button type="button" class="track-card__play" @click="play">▶</button>
-        </div>
+            <span class="track-card__play" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
+                {{ isPlaying ? '❚❚' : '▶' }}
+            </span>
+        </button>
 
         <div class="track-card__body">
             <div class="track-card__meta">
@@ -49,14 +53,7 @@ const addToQueue = () => {
 
             <div class="track-card__footer">
                 <span class="track-card__duration">{{ track.duration_human }}</span>
-
-                <div class="track-card__actions">
-                    <button type="button" class="icon-button" @click="addToQueue" aria-label="Добавить в очередь">
-                        <span aria-hidden="true">＋</span>
-                    </button>
-
-                    <LikeButton :track-id="track.id" icon-only />
-                </div>
+                <LikeButton :track-id="track.id" icon-only />
             </div>
         </div>
     </article>

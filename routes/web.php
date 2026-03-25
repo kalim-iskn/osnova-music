@@ -8,6 +8,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\TrackLikeController;
+use App\Http\Controllers\TrackPlayController;
 use App\Http\Controllers\TrackStreamController;
 use Illuminate\Support\Facades\Route;
 
@@ -16,6 +17,7 @@ Route::get('/search', [SearchController::class, 'index'])->name('search');
 Route::get('/artists/{artist:slug}', [ArtistController::class, 'show'])->name('artists.show');
 Route::get('/albums/{album:slug}', [AlbumController::class, 'show'])->name('albums.show');
 Route::get('/tracks/{track}/stream', TrackStreamController::class)->name('tracks.stream');
+Route::post('/tracks/{track}/play', TrackPlayController::class)->name('tracks.play');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');
