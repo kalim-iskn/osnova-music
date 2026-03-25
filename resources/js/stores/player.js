@@ -3,6 +3,7 @@ import { formatSeconds } from '../utils/time';
 
 const STORAGE_KEY = 'waveflow-player';
 const PLAY_REPORT_THRESHOLD = 8;
+const REPEAT_MODES = ['off', 'track', 'queue'];
 
 const resolvePlaybackUrl = (track) => track.playback_url ?? (track.id ? `/tracks/${track.id}/stream` : track.audio_url);
 
@@ -29,6 +30,7 @@ export const usePlayerStore = defineStore('player', {
         previousVolume: 0.8,
         isPlaying: false,
         isQueueOpen: false,
+        repeatMode: 'off',
         audioElement: null,
         initialized: false,
         listeners: null,
@@ -102,8 +104,8 @@ export const usePlayerStore = defineStore('player', {
                     this.isPlaying = false;
                     this.persist();
                 },
-                ended: () => {
-                    this.playNext();
+                ended: async () => {
+                    await this.handleTrackEnded();
                 },
                 error: async () => {
                     await this.fallbackToDirectSource();
@@ -129,6 +131,7 @@ export const usePlayerStore = defineStore('player', {
                 volume: this.volume,
                 previousVolume: this.previousVolume,
                 isPlaying: this.isPlaying,
+                repeatMode: this.repeatMode,
             };
 
             localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -149,6 +152,7 @@ export const usePlayerStore = defineStore('player', {
                 this.duration = Number(parsed.duration || 0);
                 this.volume = Number(parsed.volume || 0.8);
                 this.previousVolume = Number(parsed.previousVolume || this.volume || 0.8);
+                this.repeatMode = REPEAT_MODES.includes(parsed.repeatMode) ? parsed.repeatMode : 'off';
                 this.isPlaying = false;
             } catch {
                 localStorage.removeItem(STORAGE_KEY);
@@ -282,20 +286,58 @@ export const usePlayerStore = defineStore('player', {
             this.persist();
         },
 
-        async playNext() {
-            if (!this.hasNext) {
-                this.isPlaying = false;
-                this.currentTime = 0;
-                if (this.audioElement) {
-                    this.audioElement.pause();
-                    this.audioElement.currentTime = 0;
-                }
-                this.persist();
+        async handleTrackEnded() {
+            if (this.repeatMode === 'track') {
+                this.seekTo(0);
+                await this.togglePlayback();
                 return;
             }
 
-            this.currentIndex += 1;
-            await this.loadCurrentTrack(true);
+            if (this.hasNext) {
+                this.currentIndex += 1;
+                await this.loadCurrentTrack(true);
+                return;
+            }
+
+            if (this.repeatMode === 'queue' && this.queue.length > 0) {
+                this.currentIndex = 0;
+                await this.loadCurrentTrack(true);
+                return;
+            }
+
+            this.isPlaying = false;
+            this.currentTime = 0;
+
+            if (this.audioElement) {
+                this.audioElement.pause();
+                this.audioElement.currentTime = 0;
+            }
+
+            this.persist();
+        },
+
+        async playNext() {
+            if (this.hasNext) {
+                this.currentIndex += 1;
+                await this.loadCurrentTrack(true);
+                return;
+            }
+
+            if (this.repeatMode === 'queue' && this.queue.length > 0) {
+                this.currentIndex = 0;
+                await this.loadCurrentTrack(true);
+                return;
+            }
+
+            this.isPlaying = false;
+            this.currentTime = 0;
+
+            if (this.audioElement) {
+                this.audioElement.pause();
+                this.audioElement.currentTime = 0;
+            }
+
+            this.persist();
         },
 
         async playPrevious() {
@@ -305,6 +347,12 @@ export const usePlayerStore = defineStore('player', {
             }
 
             if (!this.hasPrevious) {
+                if (this.repeatMode === 'queue' && this.queue.length > 0) {
+                    this.currentIndex = this.queue.length - 1;
+                    await this.loadCurrentTrack(true);
+                    return;
+                }
+
                 this.seekTo(0);
                 return;
             }
@@ -348,6 +396,13 @@ export const usePlayerStore = defineStore('player', {
 
             this.previousVolume = this.volume > 0 ? this.volume : this.previousVolume;
             this.setVolume(0);
+        },
+
+        cycleRepeatMode() {
+            const currentIndex = REPEAT_MODES.indexOf(this.repeatMode);
+            const nextIndex = (currentIndex + 1) % REPEAT_MODES.length;
+            this.repeatMode = REPEAT_MODES[nextIndex];
+            this.persist();
         },
 
         async playQueueItem(index) {

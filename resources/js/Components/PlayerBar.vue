@@ -23,6 +23,17 @@ const volume = computed({
     get: () => Math.round(player.volume * 100),
     set: (value) => player.setVolume(Number(value) / 100),
 });
+const repeatLabel = computed(() => {
+    if (player.repeatMode === 'track') {
+        return 'Повтор трека';
+    }
+
+    if (player.repeatMode === 'queue') {
+        return 'Повтор очереди';
+    }
+
+    return 'Повтор выключен';
+});
 </script>
 
 <template>
@@ -74,6 +85,23 @@ const volume = computed({
                 </div>
 
                 <div class="player-bar__secondary">
+                    <button
+                        class="icon-button player-bar__repeat-button"
+                        :class="{
+                            'player-bar__repeat-button--active': player.repeatMode !== 'off',
+                            'player-bar__repeat-button--queue': player.repeatMode === 'queue',
+                        }"
+                        type="button"
+                        :disabled="!currentTrack"
+                        :aria-label="repeatLabel"
+                        :title="repeatLabel"
+                        @click="player.cycleRepeatMode()"
+                    >
+                        <span aria-hidden="true">↻</span>
+                        <small v-if="player.repeatMode === 'track'">1</small>
+                        <small v-else-if="player.repeatMode === 'queue'">Q</small>
+                    </button>
+
                     <LikeButton v-if="currentTrack" :track-id="currentTrack.id" icon-only />
 
                     <label class="volume-control">

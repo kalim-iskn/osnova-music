@@ -2,17 +2,12 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Artist extends Model
 {
-    use HasFactory;
-
-    /**
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'slug',
@@ -27,6 +22,11 @@ class Artist extends Model
     public function tracks(): HasMany
     {
         return $this->hasMany(Track::class);
+    }
+
+    public function creditedTracks(): BelongsToMany
+    {
+        return $this->belongsToMany(Track::class, 'artist_track')->withTimestamps();
     }
 
     public function getRouteKeyName(): string

@@ -73,7 +73,7 @@ const addToQueue = () => {
 
         <div class="track-row__actions">
             <div class="track-row__lead-actions">
-                <button class="ghost-button ghost-button--small track-row__play-toggle" type="button" @click="toggleTrack">
+                <button class="icon-button track-row__play-toggle" type="button" @click="toggleTrack" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
                     {{ isPlaying ? '❚❚' : '▶' }}
                 </button>
                 <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />

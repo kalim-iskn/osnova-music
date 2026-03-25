@@ -4,7 +4,7 @@ import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
 import TrackRow from '../../Components/TrackRow.vue';
-import { formatCount } from '../../utils/pluralize';
+import { formatCount, formatNumberedCount } from '../../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
 
@@ -28,9 +28,9 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
         <div>
             <span class="eyebrow">Исполнитель</span>
             <h1>{{ artist.name }}</h1>
-            <p>
-                В каталоге {{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }} —
-                запускайте любимые композиции и собирайте свою очередь.
+            <p class="hero-card__description hero-card__description--stacked">
+                <span>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }} в каталоге.</span>
+                <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
             </p>
         </div>
     </section>
@@ -38,7 +38,10 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
     <section class="section-grid">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <h2>Треки исполнителя</h2>
+                <div>
+                    <span class="eyebrow">Треки</span>
+                    <h2>Треки исполнителя</h2>
+                </div>
                 <span class="badge">{{ totalTracks }}</span>
             </div>
 
@@ -51,7 +54,10 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
 
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <h2>Альбомы</h2>
+                <div>
+                    <span class="eyebrow">Альбомы</span>
+                    <h2>Релизы</h2>
+                </div>
                 <span class="badge">{{ albums.length }}</span>
             </div>
 

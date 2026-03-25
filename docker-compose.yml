@@ -11,6 +11,10 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    volumes:
+      - ./:/var/www/html
+      # быстрый vendor для PHP (vendor copy в windows: docker cp work_project_php:/opt/app/vendor ./vendor)
+      - vendor_data:/var/www/html/vendor
 
   db:
     image: postgres:18-alpine
@@ -31,3 +35,4 @@ services:
 
 volumes:
   postgres_data:
+  vendor_data:

@@ -20,7 +20,6 @@ const navigation = [
 ];
 
 const visibleNavigation = computed(() => navigation.filter((item) => !item.auth || user.value));
-const isAuthPage = computed(() => ['/login', '/register'].includes(currentUrl.value.split('?')[0]));
 
 const isActive = (href) => {
     if (href === '/') {
@@ -37,6 +36,7 @@ const closeMenus = () => {
 
 const toggleMobileMenu = () => {
     isMobileMenuOpen.value = !isMobileMenuOpen.value;
+
     if (isMobileMenuOpen.value) {
         isProfileMenuOpen.value = false;
     }
@@ -57,7 +57,7 @@ watch(currentUrl, () => {
 </script>
 
 <template>
-    <div class="app-shell" :class="{ 'app-shell--no-player': isAuthPage }">
+    <div class="app-shell">
         <Head />
 
         <div class="ambient ambient-left"></div>
@@ -86,7 +86,7 @@ watch(currentUrl, () => {
                         </Link>
                     </nav>
 
-                    <SearchBox v-if="!isAuthPage" :initial-query="page.props.term ?? ''" class="site-search site-search--desktop" />
+                    <SearchBox :initial-query="page.props.term ?? ''" class="site-search site-search--desktop" />
 
                     <div class="header-actions header-actions--desktop">
                         <template v-if="user">
@@ -133,7 +133,7 @@ watch(currentUrl, () => {
                     </div>
                 </div>
 
-                <div v-if="!isAuthPage" class="site-header__mobile-search">
+                <div class="site-header__mobile-search">
                     <SearchBox :initial-query="page.props.term ?? ''" class="site-search" />
                 </div>
 
@@ -187,6 +187,6 @@ watch(currentUrl, () => {
             <slot />
         </main>
 
-        <PlayerBar v-if="!isAuthPage" />
+        <PlayerBar />
     </div>
 </template>

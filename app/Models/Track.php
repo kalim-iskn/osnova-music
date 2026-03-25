@@ -2,24 +2,19 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Track extends Model
 {
-    use HasFactory;
-
-    /**
-     * @var list<string>
-     */
     protected $fillable = [
         'artist_id',
         'album_id',
         'title',
         'duration_seconds',
         'audio_url',
+        'original_link',
         'cover_image_url',
         'track_number',
         'is_downloaded',
@@ -46,6 +41,11 @@ class Track extends Model
         return $this->belongsTo(Album::class);
     }
 
+    public function artists(): BelongsToMany
+    {
+        return $this->belongsToMany(Artist::class, 'artist_track')->withTimestamps();
+    }
+
     public function likedByUsers(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'track_user_likes')->withTimestamps();
@@ -53,8 +53,8 @@ class Track extends Model
 
     public function getDurationHumanAttribute(): string
     {
-        $minutes = intdiv($this->duration_seconds, 60);
-        $seconds = $this->duration_seconds % 60;
+        $minutes = intdiv((int) $this->duration_seconds, 60);
+        $seconds = (int) $this->duration_seconds % 60;
 
         return sprintf('%d:%02d', $minutes, $seconds);
     }

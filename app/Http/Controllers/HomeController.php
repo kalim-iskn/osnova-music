@@ -23,7 +23,6 @@ class HomeController extends Controller
 
         $spotlightArtists = Artist::query()
             ->withCount('tracks')
-            ->withSum('tracks as plays_count', 'plays_count')
             ->latest('id')
             ->limit(6)
             ->get();

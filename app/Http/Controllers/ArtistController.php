@@ -6,6 +6,7 @@ use App\Http\Resources\AlbumResource;
 use App\Http\Resources\ArtistResource;
 use App\Http\Resources\TrackResource;
 use App\Models\Artist;
+use App\Models\Track;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -14,7 +15,11 @@ class ArtistController extends Controller
 {
     public function show(Artist $artist): Response
     {
-        $artist->loadCount('tracks');
+        $creditedTracksQuery = Track::query()
+            ->whereHas('artists', fn ($query) => $query->whereKey($artist->id));
+
+        $artist->setAttribute('tracks_count', (clone $creditedTracksQuery)->count());
+        $artist->setAttribute('plays_count', (int) (clone $creditedTracksQuery)->sum('plays_count'));
 
         $albums = $artist->albums()
             ->with(['artist'])
@@ -22,7 +27,7 @@ class ArtistController extends Controller
             ->latest('id')
             ->get();
 
-        $tracks = $artist->tracks()
+        $tracks = $creditedTracksQuery
             ->with(['artist', 'album'])
             ->latest('id')
             ->paginate(20)
