@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
@@ -14,9 +14,27 @@ const props = defineProps({
     tracks: [Array, Object],
 });
 
+const runtime = ref(null);
 const trackItems = computed(() => Array.isArray(props.tracks) ? props.tracks : props.tracks?.data ?? []);
 const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tracks);
 const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.value.length);
+const artistDescription = computed(() => runtime.value?.artist?.description_preview ?? props.artist.description_preview ?? null);
+const artistSocialLinks = computed(() => runtime.value?.artist?.social_links ?? {});
+
+const fetchRuntime = async () => {
+    if (!props.artist?.genius_id || !window.axios) {
+        return;
+    }
+
+    try {
+        const { data } = await window.axios.get(`/artists/${props.artist.slug}/genius`);
+        runtime.value = data;
+    } catch {
+        runtime.value = null;
+    }
+};
+
+onMounted(fetchRuntime);
 </script>
 
 <template>
@@ -33,9 +51,22 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
                 <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
             </p>
 
-            <p v-if="artist.description_preview" class="hero-card__description hero-card__description--text">
-                {{ artist.description_preview }}
+            <p v-if="artistDescription" class="hero-card__description hero-card__description--text">
+                {{ artistDescription }}
             </p>
+
+            <div v-if="Object.keys(artistSocialLinks).length" class="artist-page__socials">
+                <a
+                    v-for="(value, key) in artistSocialLinks"
+                    :key="key"
+                    :href="`https://${key}.com/${value}`"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ghost-button ghost-button--small"
+                >
+                    {{ key }}
+                </a>
+            </div>
         </div>
     </section>
 
@@ -84,3 +115,12 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
         </div>
     </section>
 </template>
+
+<style scoped>
+.artist-page__socials {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+</style>

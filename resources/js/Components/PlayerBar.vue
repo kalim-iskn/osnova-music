@@ -4,6 +4,7 @@ import { Link } from '@inertiajs/vue3';
 import { usePlayerStore } from '../stores/player';
 import QueueDrawer from './QueueDrawer.vue';
 import LikeButton from './LikeButton.vue';
+import TrackArtists from './TrackArtists.vue';
 import { formatSeconds } from '../utils/time';
 
 const audioRef = ref(null);
@@ -51,7 +52,7 @@ const repeatLabel = computed(() => {
                         <strong class="player-bar__title">{{ currentTrack.title }}</strong>
 
                         <div class="player-bar__track-meta">
-                            <Link :href="`/artists/${currentTrack.artist.slug}`">{{ currentTrack.artist.name }}</Link>
+                            <TrackArtists :track="currentTrack" />
 
                             <template v-if="currentTrack.album">
                                 <span class="player-bar__separator">•</span>
@@ -109,7 +110,16 @@ const repeatLabel = computed(() => {
                             <span aria-hidden="true">{{ player.isMuted ? '🔇' : '🔊' }}</span>
                         </button>
 
-                        <input v-model="volume" type="range" min="0" max="100" step="1" aria-label="Громкость" :disabled="!currentTrack">
+                        <input
+                            :value="volume"
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            aria-label="Громкость"
+                            :disabled="!currentTrack"
+                            @input="volume = Number($event.target.value)"
+                        >
                     </label>
 
                     <button class="ghost-button ghost-button--small player-bar__queue-button" type="button" @click="player.toggleQueue()">
@@ -123,12 +133,13 @@ const repeatLabel = computed(() => {
                 <span>{{ formatSeconds(player.currentTime) }}</span>
 
                 <input
-                    v-model="progress"
+                    :value="progress"
                     type="range"
                     min="0"
                     :max="totalDuration"
                     step="1"
                     :disabled="!currentTrack"
+                    @input="progress = Number($event.target.value)"
                 >
 
                 <span>{{ formatSeconds(totalDuration) }}</span>
@@ -136,3 +147,22 @@ const repeatLabel = computed(() => {
         </div>
     </div>
 </template>
+
+<style scoped>
+.player-bar__controls {
+    justify-self: center;
+    margin-inline: auto;
+}
+
+.player-bar__timeline input,
+.volume-control input {
+    cursor: pointer;
+}
+
+.player-bar__track-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+}
+</style>

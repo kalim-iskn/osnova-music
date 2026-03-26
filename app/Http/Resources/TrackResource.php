@@ -26,7 +26,7 @@ class TrackResource extends JsonResource
         return [
             'id' => $this->id,
             'title' => $this->title,
-            'show_url' => route('tracks.show', $this->resource),
+            'show_url' => route('tracks.show', ['track' => $this->id]),
             'duration_seconds' => (int) $this->duration_seconds,
             'duration_human' => $this->duration_human,
             'audio_url' => $this->audio_url,
@@ -35,6 +35,7 @@ class TrackResource extends JsonResource
             'track_number' => $this->track_number,
             'is_downloaded' => (bool) $this->is_downloaded,
             'plays_count' => (int) ($this->plays_count ?? 0),
+            'genius_pageviews' => (int) ($this->genius_pageviews ?? 0),
             'release_year' => $this->release_year,
             'genres' => array_values(array_filter((array) ($this->genres ?? []))),
             'language' => $this->language,
@@ -46,6 +47,8 @@ class TrackResource extends JsonResource
                     'id' => $primaryArtist->id,
                     'name' => $primaryArtist->name,
                     'slug' => $primaryArtist->slug,
+                    'image_url' => $primaryArtist->image_url,
+                    'genius_id' => $primaryArtist->genius_id,
                 ]
                 : null,
             'artists' => $resolvedArtists
@@ -53,6 +56,8 @@ class TrackResource extends JsonResource
                     'id' => $artist->id,
                     'name' => $artist->name,
                     'slug' => $artist->slug,
+                    'image_url' => $artist->image_url,
+                    'genius_id' => $artist->genius_id,
                 ])
                 ->values()
                 ->all(),
@@ -61,6 +66,7 @@ class TrackResource extends JsonResource
                     'id' => $this->album->id,
                     'title' => $this->album->title,
                     'slug' => $this->album->slug,
+                    'cover_image_url' => $this->album->cover_image_url,
                 ]
                 : null,
         ];

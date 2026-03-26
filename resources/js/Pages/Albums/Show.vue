@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
@@ -13,15 +13,33 @@ const props = defineProps({
     tracks: [Array, Object],
 });
 
+const runtime = ref(null);
 const trackItems = computed(() => Array.isArray(props.tracks) ? props.tracks : props.tracks?.data ?? []);
 const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tracks);
+const albumDescription = computed(() => runtime.value?.album?.description_preview ?? null);
+const displayReleaseDate = computed(() => runtime.value?.album?.release_date ?? props.album.release_date ?? null);
+
+const fetchRuntime = async () => {
+    if (!props.album?.genius_id || !window.axios) {
+        return;
+    }
+
+    try {
+        const { data } = await window.axios.get(`/albums/${props.album.slug}/genius`);
+        runtime.value = data;
+    } catch {
+        runtime.value = null;
+    }
+};
+
+onMounted(fetchRuntime);
 </script>
 
 <template>
     <Head :title="album.title" />
 
     <section class="hero-card hero-card--album">
-        <img :src="album.cover_image_url" :alt="album.title" class="hero-card__album-cover">
+        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover">
 
         <div>
             <span class="eyebrow">Альбом</span>
@@ -31,10 +49,14 @@ const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tra
                 <Link :href="`/artists/${album.artist.slug}`">{{ album.artist.name }}</Link>
                 <span class="hero-card__separator">•</span>
                 <span>{{ formatCount(album.tracks_count, ['трек', 'трека', 'треков']) }}</span>
-                <template v-if="album.release_date">
+                <template v-if="displayReleaseDate">
                     <span class="hero-card__separator">•</span>
-                    <span>{{ album.release_date }}</span>
+                    <span>{{ displayReleaseDate }}</span>
                 </template>
+            </p>
+
+            <p v-if="albumDescription" class="hero-card__description hero-card__description--text">
+                {{ albumDescription }}
             </p>
         </div>
     </section>

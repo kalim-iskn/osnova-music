@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -26,6 +27,7 @@ class Track extends Model
         'is_downloaded',
         'plays_count',
         'genius_id',
+        'genius_pageviews',
     ];
 
     protected function casts(): array
@@ -38,7 +40,16 @@ class Track extends Model
             'is_downloaded' => 'boolean',
             'plays_count' => 'integer',
             'genius_id' => 'integer',
+            'genius_pageviews' => 'integer',
         ];
+    }
+
+    public function scopePopular(Builder $query): Builder
+    {
+        return $query
+            ->orderByDesc('plays_count')
+            ->orderByDesc('genius_pageviews')
+            ->orderByDesc('id');
     }
 
     public function artist(): BelongsTo

@@ -1,8 +1,24 @@
 <script setup>
+import { ref } from 'vue';
 import { formatCount } from '../utils/pluralize';
 import { usePlayerStore } from '../stores/player';
+import TrackArtists from './TrackArtists.vue';
 
 const player = usePlayerStore();
+const dragIndex = ref(null);
+
+const onDragStart = (index) => {
+    dragIndex.value = index;
+};
+
+const onDrop = (index) => {
+    if (dragIndex.value === null) {
+        return;
+    }
+
+    player.moveQueueItem(dragIndex.value, index);
+    dragIndex.value = null;
+};
 </script>
 
 <template>
@@ -33,13 +49,19 @@ const player = usePlayerStore();
                         :key="`${track.id}-${index}`"
                         class="queue-item"
                         :class="{ 'queue-item--active': player.currentIndex === index }"
+                        draggable="true"
+                        @dragstart="onDragStart(index)"
+                        @dragover.prevent
+                        @drop="onDrop(index)"
                     >
+                        <button type="button" class="queue-item__handle" aria-label="Переместить">⋮⋮</button>
+
                         <button type="button" class="queue-item__select" @click="player.playQueueItem(index)">
                             <img :src="track.cover_image_url" :alt="track.title" class="queue-item__cover">
 
                             <span class="queue-item__meta">
                                 <strong>{{ track.title }}</strong>
-                                <small>{{ track.artist.name }}</small>
+                                <small><TrackArtists :track="track" /></small>
                             </span>
 
                             <span class="queue-item__duration">{{ track.duration_human }}</span>
@@ -63,3 +85,50 @@ const player = usePlayerStore();
         </aside>
     </transition>
 </template>
+
+<style scoped>
+.queue-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    overflow: visible;
+    border-radius: 16px;
+}
+
+.queue-item--active {
+    outline: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.queue-item__handle {
+    cursor: grab;
+}
+
+.queue-item__select {
+    min-width: 0;
+}
+
+.queue-item__meta,
+.queue-item__meta strong,
+.queue-item__meta small {
+    min-width: 0;
+}
+
+.queue-item__meta small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .queue-item {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .queue-item__handle {
+        display: none;
+    }
+}
+</style>

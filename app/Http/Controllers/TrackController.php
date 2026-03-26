@@ -34,8 +34,7 @@ class TrackController extends Controller
                 }
             })
             ->with(['artist', 'artists', 'album'])
-            ->orderByDesc('plays_count')
-            ->orderByDesc('id')
+            ->popular()
             ->limit(12)
             ->get();
 

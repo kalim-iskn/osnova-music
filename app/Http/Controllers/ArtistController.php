@@ -30,8 +30,7 @@ class ArtistController extends Controller
 
         $tracks = $creditedTracksQuery
             ->with(['artist', 'artists', 'album'])
-            ->latest('release_year')
-            ->latest('id')
+            ->popular()
             ->paginate(20)
             ->withQueryString();
 

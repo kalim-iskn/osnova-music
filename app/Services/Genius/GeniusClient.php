@@ -5,6 +5,7 @@ namespace App\Services\Genius;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -174,6 +175,10 @@ class GeniusClient
     private function get(string $path, array $query = [], ?string $cacheKey = null, bool $allowFailure = false): array
     {
         $cacheKey ??= 'genius:' . md5($path . ':' . json_encode($query));
+
+        File::ensureDirectoryExists(storage_path('framework'));
+        File::ensureDirectoryExists(storage_path('framework/cache'));
+        File::ensureDirectoryExists(storage_path('framework/cache/data'));
 
         return Cache::remember($cacheKey, $this->cacheTtl, function () use ($path, $query, $allowFailure): array {
             $response = $this->request()

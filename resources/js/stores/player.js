@@ -10,14 +10,17 @@ const resolvePlaybackUrl = (track) => track.playback_url ?? (track.id ? `/tracks
 const sanitizeTrack = (track) => ({
     id: track.id,
     title: track.title,
+    show_url: track.show_url ?? (track.id ? `/tracks/${track.id}` : null),
     audio_url: track.audio_url,
     playback_url: resolvePlaybackUrl(track),
     cover_image_url: track.cover_image_url,
     duration_seconds: Number(track.duration_seconds || 0),
     duration_human: track.duration_human ?? formatSeconds(track.duration_seconds || 0),
     plays_count: Number(track.plays_count || 0),
-    artist: track.artist,
-    album: track.album,
+    genius_pageviews: Number(track.genius_pageviews || 0),
+    artist: track.artist ?? null,
+    artists: Array.isArray(track.artists) ? track.artists : (track.artist ? [track.artist] : []),
+    album: track.album ?? null,
 });
 
 export const usePlayerStore = defineStore('player', {
@@ -412,6 +415,31 @@ export const usePlayerStore = defineStore('player', {
 
             this.currentIndex = index;
             await this.loadCurrentTrack(true);
+        },
+
+        moveQueueItem(fromIndex, toIndex) {
+            if (
+                fromIndex === toIndex ||
+                fromIndex < 0 ||
+                toIndex < 0 ||
+                fromIndex >= this.queue.length ||
+                toIndex >= this.queue.length
+            ) {
+                return;
+            }
+
+            const [moved] = this.queue.splice(fromIndex, 1);
+            this.queue.splice(toIndex, 0, moved);
+
+            if (this.currentIndex === fromIndex) {
+                this.currentIndex = toIndex;
+            } else if (fromIndex < this.currentIndex && toIndex >= this.currentIndex) {
+                this.currentIndex -= 1;
+            } else if (fromIndex > this.currentIndex && toIndex <= this.currentIndex) {
+                this.currentIndex += 1;
+            }
+
+            this.persist();
         },
 
         async removeFromQueue(index) {

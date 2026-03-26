@@ -275,6 +275,10 @@ class MuzofondTrackParser
                 continue;
             }
 
+            if (! $this->isMainArtistTrackItem($xpath, $item)) {
+                continue;
+            }
+
             $playNode = $this->firstNodeFromContext($xpath, $item, [
                 ".//li[contains(concat(' ', normalize-space(@class), ' '), ' play ')][@data-url]",
             ]);
@@ -610,10 +614,55 @@ class MuzofondTrackParser
 
     private function normalizeText(string $value): string
     {
+        $value = $this->forceUtf8($value);
         $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
+        $value = preg_replace('/[[:cntrl:]]+/u', ' ', $value) ?? $value;
         $value = trim((string) preg_replace('/\s+/u', ' ', $value));
 
-        return trim($value);
+        return $this->repairMojibake(trim($value));
+    }
+
+    private function forceUtf8(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+
+        foreach (['Windows-1251', 'CP1251', 'ISO-8859-1'] as $encoding) {
+            $converted = @mb_convert_encoding($value, 'UTF-8', $encoding);
+
+            if (is_string($converted) && $converted !== '' && mb_check_encoding($converted, 'UTF-8')) {
+                return $converted;
+            }
+        }
+
+        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+
+        return is_string($clean) ? $clean : $value;
+    }
+
+    private function repairMojibake(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (preg_match('/(?:Р.|С.){2,}/u', $value) !== 1) {
+            return $value;
+        }
+
+        $decoded = @iconv('Windows-1251', 'UTF-8//IGNORE', $value);
+
+        if (is_string($decoded) && $decoded !== '' && preg_match('/\p{Cyrillic}/u', $decoded) === 1) {
+            return trim($decoded);
+        }
+
+        return $value;
     }
 
     /**
@@ -663,7 +712,7 @@ class MuzofondTrackParser
 
         $this->ensureSuccessfulHtmlResponse($response, $url);
 
-        return (string) $response->body();
+        return $this->forceUtf8((string) $response->body());
     }
 
     private function ensureSuccessfulHtmlResponse(Response $response, string $url): void
@@ -689,6 +738,8 @@ class MuzofondTrackParser
 
     private function makeXPath(string $html): \DOMXPath
     {
+        $html = $this->forceUtf8($html);
+
         libxml_use_internal_errors(true);
 
         $dom = new \DOMDocument();
@@ -773,6 +824,59 @@ class MuzofondTrackParser
         }
 
         return null;
+    }
+
+
+    private function isMainArtistTrackItem(\DOMXPath $xpath, \DOMElement $item): bool
+    {
+        $classProbe = mb_strtolower($this->ancestorClassStack($item));
+
+        if (preg_match('/\b(sidebar|recommend|related|promo|popular|novink|new)\b/u', $classProbe) === 1) {
+            return false;
+        }
+
+        $heading = mb_strtolower($this->nearestSectionHeading($xpath, $item));
+
+        return ! str_contains($heading, 'новинки');
+    }
+
+    private function ancestorClassStack(\DOMNode $node): string
+    {
+        $chunks = [];
+        $current = $node;
+
+        while ($current) {
+            if ($current instanceof \DOMElement && $current->hasAttribute('class')) {
+                $chunks[] = (string) $current->getAttribute('class');
+            }
+
+            $current = $current->parentNode;
+        }
+
+        return implode(' ', $chunks);
+    }
+
+    private function nearestSectionHeading(\DOMXPath $xpath, \DOMElement $item): string
+    {
+        $node = $item;
+
+        while ($node) {
+            if ($node instanceof \DOMElement) {
+                $headingNode = $xpath->query(".//*[self::h1 or self::h2 or self::h3 or self::h4]", $node)?->item(0);
+
+                if ($headingNode) {
+                    $heading = $this->normalizeText($headingNode->textContent ?? '');
+
+                    if ($heading !== '') {
+                        return $heading;
+                    }
+                }
+            }
+
+            $node = $node->parentNode;
+        }
+
+        return '';
     }
 
     private function defaultHeaders(): array

@@ -1,7 +1,9 @@
 <?php
 
 use App\Http\Controllers\AlbumController;
+use App\Http\Controllers\AlbumGeniusController;
 use App\Http\Controllers\ArtistController;
+use App\Http\Controllers\ArtistGeniusController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\HomeController;
@@ -17,7 +19,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', HomeController::class)->name('home');
 Route::get('/search', [SearchController::class, 'index'])->name('search');
 Route::get('/artists/{artist:slug}', [ArtistController::class, 'show'])->name('artists.show');
+Route::get('/artists/{artist:slug}/genius', ArtistGeniusController::class)->name('artists.genius');
 Route::get('/albums/{album:slug}', [AlbumController::class, 'show'])->name('albums.show');
+Route::get('/albums/{album:slug}/genius', AlbumGeniusController::class)->name('albums.genius');
 Route::get('/tracks/{track}', [TrackController::class, 'show'])->name('tracks.show');
 Route::get('/tracks/{track}/genius', TrackGeniusController::class)->name('tracks.genius');
 Route::get('/tracks/{track}/stream', TrackStreamController::class)->name('tracks.stream');

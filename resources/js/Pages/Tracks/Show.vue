@@ -45,8 +45,26 @@ const languageLabel = computed(() => {
 });
 
 const trackDescription = computed(() => runtime.value?.song?.description_preview ?? props.track.description_preview ?? null);
-const currentAlbum = computed(() => runtime.value?.song?.album ?? props.track.album ?? null);
-const currentArtists = computed(() => runtime.value?.artists?.length ? runtime.value.artists : props.track.artists);
+const currentAlbum = computed(() => props.track.album ?? runtime.value?.song?.album ?? null);
+const runtimeArtistsById = computed(() => new Map((runtime.value?.artists ?? []).map((artist) => [Number(artist.id), artist])));
+const currentArtists = computed(() => {
+    const baseArtists = Array.isArray(props.track.artists) && props.track.artists.length
+        ? props.track.artists
+        : props.track.artist
+            ? [props.track.artist]
+            : [];
+
+    return baseArtists.map((artist) => {
+        const runtimeArtist = artist.genius_id ? runtimeArtistsById.value.get(Number(artist.genius_id)) : null;
+
+        return {
+            ...artist,
+            image_url: artist.image_url ?? props.track.cover_image_url,
+            social_links: runtimeArtist?.social_links ?? {},
+            genius_url: runtimeArtist?.url ?? null,
+        };
+    });
+});
 
 const fetchRuntime = async () => {
     if (!props.track.genius_id || !window.axios) {
@@ -59,8 +77,9 @@ const fetchRuntime = async () => {
     try {
         const { data } = await window.axios.get(`/tracks/${props.track.id}/genius`);
         runtime.value = data;
-    } catch (error) {
-        runtimeError.value = error?.response?.data?.message ?? 'Не удалось загрузить расширенные данные Genius.';
+    } catch {
+        runtime.value = null;
+        runtimeError.value = null;
     } finally {
         runtimeLoading.value = false;
     }
@@ -99,7 +118,6 @@ onMounted(fetchRuntime);
             </div>
 
             <div v-if="runtimeLoading" class="track-page__status">Загружаю расширенные данные Genius…</div>
-            <div v-else-if="runtimeError" class="track-page__status track-page__status--error">{{ runtimeError }}</div>
         </div>
     </section>
 
@@ -127,37 +145,7 @@ onMounted(fetchRuntime);
                     rel="noopener noreferrer"
                     class="ghost-button"
                 >
-                    Genius: текст и аннотации
-                </a>
-
-                <a
-                    v-if="runtime?.song?.youtube_url"
-                    :href="runtime.song.youtube_url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ghost-button"
-                >
-                    YouTube
-                </a>
-
-                <a
-                    v-if="runtime?.song?.soundcloud_url"
-                    :href="runtime.song.soundcloud_url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ghost-button"
-                >
-                    SoundCloud
-                </a>
-
-                <a
-                    v-if="runtime?.song?.apple_music_player_url"
-                    :href="runtime.song.apple_music_player_url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ghost-button"
-                >
-                    Apple Music
+                    Genius
                 </a>
             </div>
         </div>
@@ -176,7 +164,15 @@ onMounted(fetchRuntime);
                     :key="artist.id ?? artist.name"
                     class="track-page__artist-card"
                 >
+                    <Link v-if="artist.slug" :href="`/artists/${artist.slug}`" class="track-page__artist-avatar-link">
+                        <img
+                            :src="artist.image_url ?? track.cover_image_url"
+                            :alt="artist.name"
+                            class="track-page__artist-avatar"
+                        >
+                    </Link>
                     <img
+                        v-else
                         :src="artist.image_url ?? track.cover_image_url"
                         :alt="artist.name"
                         class="track-page__artist-avatar"
@@ -190,7 +186,7 @@ onMounted(fetchRuntime);
                             <span v-else>{{ artist.name }}</span>
                         </h3>
 
-                        <div v-if="artist.social_links" class="track-page__artist-socials">
+                        <div v-if="artist.social_links && Object.keys(artist.social_links).length" class="track-page__artist-socials">
                             <a
                                 v-for="(value, key) in artist.social_links"
                                 :key="key"
@@ -198,7 +194,7 @@ onMounted(fetchRuntime);
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
-                                {{ key }}: {{ value }}
+                                {{ key }}
                             </a>
                         </div>
                     </div>
@@ -233,6 +229,8 @@ onMounted(fetchRuntime);
 .track-page__hero-body {
     display: grid;
     gap: 1rem;
+    justify-items: start;
+    text-align: left;
 }
 
 .track-page__chips,
@@ -247,13 +245,10 @@ onMounted(fetchRuntime);
     color: rgba(255, 255, 255, 0.7);
 }
 
-.track-page__status--error {
-    color: #ffb4b4;
-}
-
 .track-page__description {
     line-height: 1.7;
     color: rgba(255, 255, 255, 0.82);
+    text-align: left;
 }
 
 .track-page__description--muted {
@@ -273,6 +268,11 @@ onMounted(fetchRuntime);
     padding: 1rem;
     border-radius: 1.25rem;
     background: rgba(255, 255, 255, 0.04);
+}
+
+.track-page__artist-avatar-link,
+.track-page__artist-avatar {
+    display: block;
 }
 
 .track-page__artist-avatar {
