@@ -14,7 +14,7 @@ class ArtistResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'slug' => $this->slug,
-            'image_url' => $this->image_url,
+            'image_url' => $this->image_url ?: asset('artist-placeholder.svg'),
             'tracks_count' => (int) ($this->tracks_count ?? 0),
             'plays_count' => (int) ($this->plays_count ?? 0),
         ];

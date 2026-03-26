@@ -1,17 +1,23 @@
 <script setup>
+import { computed } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import PaginationBar from '../../Components/PaginationBar.vue';
+import SearchBox from '../../Components/SearchBox.vue';
 import TrackRow from '../../Components/TrackRow.vue';
-import { formatCount, formatNumberedCount } from '../../utils/pluralize';
+import { formatCount } from '../../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
 
-defineProps({
+const props = defineProps({
     term: String,
-    tracks: Array,
+    tracks: Object,
     artists: Array,
     albums: Array,
 });
+
+const trackItems = computed(() => props.tracks?.data ?? []);
+const trackTotal = computed(() => props.tracks?.meta?.total ?? trackItems.value.length);
 </script>
 
 <template>
@@ -28,17 +34,23 @@ defineProps({
             </div>
         </div>
 
+        <div class="search-page__box">
+            <SearchBox :initial-query="term ?? ''" />
+        </div>
+
         <div class="section-grid">
             <div class="panel-card">
                 <div class="section-heading section-heading--tight">
                     <h2>Треки</h2>
-                    <span class="badge">{{ tracks.length }}</span>
+                    <span class="badge">{{ trackTotal }}</span>
                 </div>
 
                 <div class="track-list">
-                    <TrackRow v-for="track in tracks" :key="track.id" :track="track" :queue="tracks" />
-                    <p v-if="!tracks.length" class="empty-state">Подходящих треков пока нет.</p>
+                    <TrackRow v-for="track in trackItems" :key="track.id" :track="track" :queue="trackItems" />
+                    <p v-if="!trackItems.length" class="empty-state">Подходящих треков пока нет.</p>
                 </div>
+
+                <PaginationBar :pagination="tracks" />
             </div>
 
             <div class="search-side-stack">
@@ -60,7 +72,6 @@ defineProps({
                             <span class="entity-list__meta">
                                 <strong>{{ artist.name }}</strong>
                                 <small>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }}</small>
-                        <small>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</small>
                             </span>
                         </Link>
 

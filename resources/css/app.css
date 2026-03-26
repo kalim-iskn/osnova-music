@@ -2472,3 +2472,71 @@ img {
         border-radius: 22px 22px 0 0;
     }
 }
+
+/* ----- Round 6 parser/search polish ----- */
+.search-page__box {
+    margin: 0 0 20px;
+}
+
+.track-row__play-toggle,
+.track-card__play {
+    border-radius: 999px;
+}
+
+.track-row__play-toggle {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+}
+
+.track-card--active,
+.track-row--active,
+.queue-item--active {
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.32), 0 20px 45px rgba(15, 23, 42, 0.28);
+}
+
+.queue-item--active {
+    background: rgba(34, 211, 238, 0.08);
+}
+
+.queue-item--active .queue-item__meta strong,
+.track-row--active .track-row__title,
+.track-card--active .track-card__title {
+    color: #f8fafc;
+}
+
+@media (max-width: 900px) {
+    .section-heading {
+        margin-bottom: 20px;
+        padding-inline: 2px;
+    }
+
+    .section-heading .eyebrow {
+        margin-bottom: 8px;
+    }
+
+    .search-page__box {
+        margin-bottom: 18px;
+    }
+}
+
+@media (max-width: 500px) {
+    .section-heading {
+        margin-bottom: 18px;
+        padding-inline: 4px;
+    }
+
+    .section-heading h1,
+    .section-heading h2 {
+        line-height: 1.2;
+    }
+
+    .search-page__box {
+        margin-bottom: 16px;
+    }
+
+    .track-card-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}

@@ -6,9 +6,10 @@ use App\Models\Album;
 use App\Models\Artist;
 use App\Models\Track;
 use App\Services\TrackParsing\DTO\ParsedArtistPage;
+use App\Services\TrackParsing\DTO\ParsedTrack;
 use App\Services\TrackParsing\MuzofondTrackParser;
+use App\Services\AudioHasher;
 use Illuminate\Console\Command;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
@@ -18,13 +19,18 @@ class ParseTracksCommand extends Command
     protected $signature = 'tracks:parse
         {parser : Parser key, for now only "muzofond"}
         {url : Artist page URL or artists listing URL}
-        {--artist-limit=0 : Limit how many artists to parse from artists listing pages}
+        {--artist-limit=0 : Limit how many artists should be parsed from listing pages}
         {--page-limit=0 : Limit pagination depth for parser pages, 0 = no limit}
         {--dry-run : Parse only, do not save anything}';
 
     protected $description = 'Parse tracks from a remote page and save artists, albums and tracks into the local catalog';
 
-    public function handle(MuzofondTrackParser $muzofondParser): int
+    /**
+     * @var array<string, string|null>
+     */
+    private array $audioHashCache = [];
+
+    public function handle(MuzofondTrackParser $muzofondParser, AudioHasher $audioHasher): int
     {
         $parserKey = Str::lower(trim((string) $this->argument('parser')));
         $url = trim((string) $this->argument('url'));
@@ -71,12 +77,7 @@ class ParseTracksCommand extends Command
             }
 
             try {
-                DB::transaction(function () use (
-                    $page,
-                    &$savedArtists,
-                    &$savedTracks,
-                    &$savedAlbums
-                ): void {
+                DB::transaction(function () use ($page, $audioHasher, &$savedArtists, &$savedTracks, &$savedAlbums): void {
                     [$artist, $artistCreated] = $this->upsertPrimaryArtist($page);
 
                     if ($artistCreated) {
@@ -84,9 +85,11 @@ class ParseTracksCommand extends Command
                     }
 
                     foreach ($page->tracks as $parsedTrack) {
+                        $audioHash = $this->resolveAudioHash($parsedTrack, $audioHasher);
+
                         $collaboratorIds = collect($parsedTrack->artistNames)
-                            ->filter(fn ($name) => trim($name) !== '')
-                            ->map(fn ($name) => $this->upsertArtistByName($name)->id)
+                            ->filter(fn ($name) => trim((string) $name) !== '')
+                            ->map(fn (string $name) => $this->upsertArtistByName($name)->id)
                             ->unique()
                             ->values();
 
@@ -109,25 +112,22 @@ class ParseTracksCommand extends Command
                         [$track, $trackCreated] = $this->upsertTrack(
                             $artist,
                             $albumId,
-                            $parsedTrack->title,
-                            $parsedTrack->durationSeconds,
-                            $parsedTrack->audioUrl
+                            $parsedTrack,
+                            $audioHash,
                         );
 
                         if ($trackCreated) {
                             $savedTracks++;
                         }
 
-                        if (method_exists($track, 'artists')) {
-                            $track->artists()->syncWithoutDetaching($collaboratorIds->all());
-                        }
+                        $track->artists()->syncWithoutDetaching($collaboratorIds->all());
                     }
                 });
             } catch (Throwable $exception) {
                 $this->error(sprintf(
                     'Ошибка при сохранении артиста "%s": %s',
                     $page->artistName,
-                    $exception->getMessage()
+                    $exception->getMessage(),
                 ));
             }
         }
@@ -144,7 +144,7 @@ class ParseTracksCommand extends Command
             'Готово. Новых артистов: %d, альбомов: %d, треков: %d',
             $savedArtists,
             $savedAlbums,
-            $savedTracks
+            $savedTracks,
         ));
 
         return self::SUCCESS;
@@ -165,7 +165,7 @@ class ParseTracksCommand extends Command
             $created = true;
         } else {
             $artist->forceFill([
-                'name' => $artist->name ?: $page->artistName,
+                'name' => $page->artistName,
                 'image_url' => $artist->image_url ?: $page->imageUrl,
             ])->save();
         }
@@ -232,20 +232,27 @@ class ParseTracksCommand extends Command
     private function upsertTrack(
         Artist $primaryArtist,
         ?int $albumId,
-        string $title,
-        int $durationSeconds,
-        string $audioUrl
+        ParsedTrack $parsedTrack,
+        ?string $audioHash,
     ): array {
-        $title = trim($title);
-        $audioUrl = trim($audioUrl);
+        $title = trim($parsedTrack->title);
+        $audioUrl = trim($parsedTrack->audioUrl);
 
-        $track = Track::query()
-            ->where(function ($query) use ($audioUrl) {
-                $query
-                    ->where('audio_url', $audioUrl)
-                    ->orWhere('original_link', $audioUrl);
-            })
-            ->first();
+        $track = null;
+
+        if ($audioHash !== null) {
+            $track = Track::query()->where('audio_hash', $audioHash)->first();
+        }
+
+        if (! $track && $audioUrl !== '') {
+            $track = Track::query()
+                ->where(function ($query) use ($audioUrl) {
+                    $query
+                        ->where('audio_url', $audioUrl)
+                        ->orWhere('original_link', $audioUrl);
+                })
+                ->first();
+        }
 
         if (! $track) {
             $track = Track::query()
@@ -266,9 +273,12 @@ class ParseTracksCommand extends Command
             'artist_id' => $primaryArtist->id,
             'album_id' => $albumId,
             'title' => $title,
-            'duration_seconds' => $durationSeconds,
+            'duration_seconds' => $parsedTrack->durationSeconds,
             'audio_url' => $audioUrl,
             'original_link' => $track->original_link ?: $audioUrl,
+            'audio_hash' => $audioHash ?: $track->audio_hash,
+            'release_year' => $parsedTrack->releaseYear,
+            'genres' => $parsedTrack->genres !== [] ? array_values($parsedTrack->genres) : null,
             'cover_image_url' => $track->cover_image_url,
             'track_number' => $track->track_number,
             'is_downloaded' => (bool) $track->is_downloaded,
@@ -302,5 +312,38 @@ class ParseTracksCommand extends Command
         }
 
         return $slug;
+    }
+
+    private function resolveAudioHash(ParsedTrack $track, AudioHasher $audioHasher): ?string
+    {
+        $audioUrl = trim($track->audioUrl);
+
+        if ($audioUrl === '') {
+            return null;
+        }
+
+        if (array_key_exists($audioUrl, $this->audioHashCache)) {
+            return $this->audioHashCache[$audioUrl];
+        }
+
+        $headers = $this->requestHeadersFor($audioUrl);
+        $this->audioHashCache[$audioUrl] = $audioHasher->hashRemote($audioUrl, $headers);
+
+        return $this->audioHashCache[$audioUrl];
+    }
+
+    private function requestHeadersFor(string $sourceUrl): array
+    {
+        $scheme = parse_url($sourceUrl, PHP_URL_SCHEME);
+        $host = parse_url($sourceUrl, PHP_URL_HOST);
+        $origin = $scheme && $host ? $scheme . '://' . $host : null;
+
+        return array_filter([
+            'Accept' => 'audio/mpeg,audio/*;q=0.9,*/*;q=0.8',
+            'Accept-Language' => 'ru,en;q=0.9',
+            'Origin' => $origin,
+            'Referer' => $origin ? $origin . '/' : null,
+            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
+        ]);
     }
 }

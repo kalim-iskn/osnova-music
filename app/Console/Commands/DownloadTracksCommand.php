@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Track;
+use App\Services\AudioHasher;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
@@ -17,7 +18,7 @@ class DownloadTracksCommand extends Command
 
     protected $description = 'Download track audio files to local storage, keep the original source link and switch tracks to relative local paths';
 
-    public function handle(): int
+    public function handle(AudioHasher $audioHasher): int
     {
         $limit = max((int) $this->option('limit'), 1);
 
@@ -39,7 +40,7 @@ class DownloadTracksCommand extends Command
         $downloadedCount = 0;
 
         foreach ($tracks as $track) {
-            $sourceUrl = trim((string) $track->original_link ?: (string) $track->audio_url);
+            $sourceUrl = trim((string) ($track->original_link ?: $track->audio_url));
 
             if ($sourceUrl === '' || ! filter_var($sourceUrl, FILTER_VALIDATE_URL)) {
                 $this->warn("Трек #{$track->id} пропущен: ссылка на исходный файл некорректна.");
@@ -49,17 +50,18 @@ class DownloadTracksCommand extends Command
             $extension = pathinfo(parse_url($sourceUrl, PHP_URL_PATH) ?? '', PATHINFO_EXTENSION);
             $extension = $extension !== '' ? strtolower($extension) : 'mp3';
 
-            $fileName = Str::slug(trim(($track->artist?->name ?? '').' '.$track->title));
-            $fileName = $fileName !== '' ? $fileName : 'track-'.$track->id;
+            $fileName = Str::slug(trim(($track->artist?->name ?? '') . ' ' . $track->title));
+            $fileName = $fileName !== '' ? $fileName : 'track-' . $track->id;
 
             $storagePath = sprintf('tracks/%06d-%s.%s', $track->id, $fileName, $extension);
             $tempDirectory = storage_path('app/tmp');
-            $tempPath = $tempDirectory.'/'.Str::uuid().'.'.$extension;
+            $tempPath = $tempDirectory . '/' . Str::uuid() . '.' . $extension;
 
             File::ensureDirectoryExists($tempDirectory);
 
             try {
                 $response = Http::timeout(120)
+                    ->retry(1, 700)
                     ->withHeaders($this->requestHeadersFor($sourceUrl))
                     ->withOptions([
                         'sink' => $tempPath,
@@ -73,6 +75,29 @@ class DownloadTracksCommand extends Command
                     File::delete($tempPath);
                     $this->warn("Трек #{$track->id} не скачан: удалённый сервер вернул {$response->status()}.");
                     continue;
+                }
+
+                $audioHash = $audioHasher->hashLocalFile($tempPath);
+
+                if ($audioHash !== null) {
+                    $duplicate = Track::query()
+                        ->where('audio_hash', $audioHash)
+                        ->whereKeyNot($track->id)
+                        ->first();
+
+                    if ($duplicate) {
+                        File::delete($tempPath);
+
+                        $track->forceFill([
+                            'original_link' => $track->original_link ?: $sourceUrl,
+                            'audio_url' => $duplicate->audio_url,
+                            'audio_hash' => $audioHash,
+                            'is_downloaded' => (bool) $duplicate->is_downloaded,
+                        ])->save();
+
+                        $this->info("Трек #{$track->id}: найден дубль по хэшу, использован уже сохранённый файл.");
+                        continue;
+                    }
                 }
 
                 $stream = fopen($tempPath, 'r');
@@ -92,7 +117,8 @@ class DownloadTracksCommand extends Command
 
                 $track->forceFill([
                     'original_link' => $track->original_link ?: $sourceUrl,
-                    'audio_url' => '/storage/'.$storagePath,
+                    'audio_url' => '/storage/' . $storagePath,
+                    'audio_hash' => $audioHash,
                     'is_downloaded' => true,
                 ])->save();
 
@@ -114,13 +140,13 @@ class DownloadTracksCommand extends Command
     {
         $scheme = parse_url($sourceUrl, PHP_URL_SCHEME);
         $host = parse_url($sourceUrl, PHP_URL_HOST);
-        $origin = $scheme && $host ? $scheme.'://'.$host : null;
+        $origin = $scheme && $host ? $scheme . '://' . $host : null;
 
         return array_filter([
             'Accept' => 'audio/mpeg,audio/*;q=0.9,*/*;q=0.8',
             'Accept-Language' => 'ru,en;q=0.9',
             'Origin' => $origin,
-            'Referer' => $origin ? $origin.'/' : null,
+            'Referer' => $origin ? $origin . '/' : null,
             'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
         ]);
     }

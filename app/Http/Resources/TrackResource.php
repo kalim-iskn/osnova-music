@@ -12,7 +12,8 @@ class TrackResource extends JsonResource
     {
         $coverImageUrl = $this->cover_image_url
             ?: $this->album?->cover_image_url
-            ?: $this->artist?->image_url;
+            ?: $this->artist?->image_url
+            ?: asset('track-placeholder.svg');
 
         return [
             'id' => $this->id,

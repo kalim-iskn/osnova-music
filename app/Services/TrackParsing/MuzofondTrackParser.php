@@ -12,7 +12,23 @@ use Throwable;
 
 class MuzofondTrackParser
 {
-    private const string BASE_URL = 'https://muzofond.fm';
+    private const BASE_URL = 'https://muzofond.fm';
+
+    /**
+     * @var string[]
+     */
+    private const GENRE_TOKENS = [
+        'русский рэп', 'русский поп', 'русский рок', 'русский шансон', 'русская попса',
+        'зарубежный рэп', 'зарубежная попса', 'зарубежный рок', 'рэп', 'hip-hop', 'hip hop',
+        'trap', 'drill', 'phonk', 'r&b', 'rnb', 'soul', 'jazz', 'blues', 'funk', 'disco',
+        'dance', 'dance & house', 'house', 'deep house', 'progressive house', 'electro-house',
+        'electro house', 'techno', 'trance', 'edm', 'pop', 'rock', 'indie', 'alternative',
+        'metal', 'punk', 'lo-fi', 'lofi', 'ambient', 'electronic', 'folk', 'country',
+        'k-pop', 'j-pop', 'latin', 'reggaeton', 'reggae', 'dubstep', 'hardstyle', 'hard bass',
+        'chillout', 'soundtrack', 'instrumental', 'club', 'шансон', 'поп', 'рок', 'метал',
+        'электроника', 'электронная музыка', 'альтернатива', 'инди', 'хаус', 'техно', 'транс',
+        'дэнс', 'поп-музыка', 'поп музыка', 'драм-н-бейс', 'dnb', 'drum & bass',
+    ];
 
     /**
      * @return ParsedArtistPage[]
@@ -83,9 +99,9 @@ class MuzofondTrackParser
 
             try {
                 $html = $this->fetchHtml($pageUrl);
-            } catch (Throwable $e) {
+            } catch (Throwable $exception) {
                 if ($page === 1) {
-                    throw $e;
+                    throw $exception;
                 }
 
                 break;
@@ -131,37 +147,36 @@ class MuzofondTrackParser
 
     private function isArtistsListingUrl(string $url): bool
     {
-        $path = trim((string) parse_url($url, PHP_URL_PATH), '/');
+        $segments = $this->pathSegments($url);
 
-        return preg_match('~^collections/artists(?:/\d+)?$~', $path) === 1
-            && str_contains($url, 'country_tag=');
+        return count($segments) >= 2
+            && $segments[0] === 'collections'
+            && $segments[1] === 'artists'
+            && (! isset($segments[2]) || ctype_digit((string) $segments[2]));
     }
 
     private function artistSlugFromUrl(string $url): string
     {
-        $path = trim((string) parse_url($url, PHP_URL_PATH), '/');
-        $segments = array_values(array_filter(explode('/', $path)));
+        $segments = $this->pathSegments($url);
 
-        if ($segments === []) {
+        if (count($segments) < 3) {
             throw new RuntimeException('Не удалось определить slug артиста из URL.');
         }
 
-        $last = end($segments);
+        $slug = $segments[2];
 
-        if (is_string($last) && preg_match('/^\d+$/', $last) === 1) {
-            $last = prev($segments);
+        if ($slug === '' || ctype_digit($slug)) {
+            throw new RuntimeException('В URL отсутствует корректный slug артиста.');
         }
 
-        return (string) $last;
+        return $slug;
     }
 
     private function listingPageUrl(string $baseUrl, int $page): string
     {
         $parts = parse_url($baseUrl);
-
         $path = $parts['path'] ?? '/collections/artists';
-        $path = rtrim($path, '/');
-        $path = preg_replace('~/\d+$~', '', $path) ?: $path;
+        $path = rtrim((string) preg_replace('~/\d+$~', '', rtrim($path, '/')), '/');
 
         if ($page > 1) {
             $path .= '/' . $page;
@@ -175,10 +190,8 @@ class MuzofondTrackParser
     private function artistPageUrl(string $baseUrl, int $page): string
     {
         $parts = parse_url($baseUrl);
-
         $path = $parts['path'] ?? '';
-        $path = rtrim($path, '/');
-        $path = preg_replace('~/\d+$~', '', $path) ?: $path;
+        $path = rtrim((string) preg_replace('~/\d+$~', '', rtrim($path, '/')), '/');
 
         if ($page > 1) {
             $path .= '/' . $page;
@@ -194,36 +207,38 @@ class MuzofondTrackParser
      */
     private function extractArtistLinksFromListing(string $html): array
     {
+        $links = [];
         $xpath = $this->makeXPath($html);
 
-        $query = <<<XPATH
-//*[contains(concat(' ', normalize-space(@class), ' '), ' plateItems ')]
-  //*[contains(concat(' ', normalize-space(@class), ' '), ' item ')]
-  //a[@href]
-XPATH;
+        $queries = [
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' plateItems ')]//a[contains(concat(' ', normalize-space(@class), ' '), ' item ')][@href]",
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' plateItems ')]//*[contains(concat(' ', normalize-space(@class), ' '), ' item ')]//a[@href]",
+        ];
 
-        $nodes = $xpath->query($query);
-        $links = [];
+        foreach ($queries as $query) {
+            $nodes = $xpath->query($query);
 
-        foreach ($nodes ?: [] as $node) {
-            $href = trim((string) $node->getAttribute('href'));
+            foreach ($nodes ?: [] as $node) {
+                $href = trim((string) $node->getAttribute('href'));
+                $artistUrl = $this->normalizeArtistListingHref($href);
 
-            if ($href === '') {
-                continue;
+                if ($artistUrl !== null && ! in_array($artistUrl, $links, true)) {
+                    $links[] = $artistUrl;
+                }
             }
+        }
 
-            if (! str_contains($href, '/collections/artists/')) {
-                continue;
-            }
+        if ($links !== []) {
+            return $links;
+        }
 
-            if (preg_match('~/collections/artists/\d+(?:\?|$)~', $href) === 1) {
-                continue;
-            }
+        preg_match_all('~href=["\'](?P<href>/collections/artists/[^"\'#?]+(?:\?[^"\'#]*)?)["\']~iu', $html, $matches);
 
-            $absolute = $this->absoluteUrl($href);
+        foreach ($matches['href'] ?? [] as $href) {
+            $artistUrl = $this->normalizeArtistListingHref($href);
 
-            if (! in_array($absolute, $links, true)) {
-                $links[] = $absolute;
+            if ($artistUrl !== null && ! in_array($artistUrl, $links, true)) {
+                $links[] = $artistUrl;
             }
         }
 
@@ -270,7 +285,7 @@ XPATH;
             }
 
             $audioUrl = trim((string) (
-            $playNode->getAttribute('href')
+                $playNode->getAttribute('href')
                 ?: $playNode->getAttribute('data-url')
                 ?: $playNode->getAttribute('data-src')
             ));
@@ -302,30 +317,33 @@ XPATH;
                 ".//*[contains(concat(' ', normalize-space(@class), ' '), ' song ')][1]",
             ]);
 
-            if ($rawTitle === '') {
-                $rawTitle = $this->extractFallbackTitleFromRow($row, $durationText);
+            $fallbackText = $this->extractFallbackTitleFromRow($row, $durationText);
+            $preparedTitle = $this->cleanupRawTitle($rawTitle !== '' ? $rawTitle : $fallbackText, $rowArtists, $pageArtistName);
+            $metadata = $this->extractTitleMetadata($preparedTitle);
+
+            if ($metadata['title'] === '' && $fallbackText !== '') {
+                $metadata = $this->extractTitleMetadata($this->cleanupRawTitle($fallbackText, $rowArtists, $pageArtistName));
             }
 
-            $preparedTitle = $this->cleanupRawTitle($rawTitle, $rowArtists, $pageArtistName);
-            [$title, $albumTitle] = $this->extractTitleAndAlbum($preparedTitle);
-
-            if ($title === '') {
+            if ($metadata['title'] === '') {
                 continue;
             }
 
             $artistNames = $this->extractArtistNames(
                 $pageArtistName,
                 $rowArtists,
-                $rawTitle,
-                $title
+                $rawTitle !== '' ? $rawTitle : $fallbackText,
+                $metadata['title']
             );
 
             $tracks[] = new ParsedTrack(
-                title: $title,
+                title: $metadata['title'],
                 durationSeconds: $durationSeconds,
                 audioUrl: $this->absoluteUrl($audioUrl),
-                albumTitle: $albumTitle,
+                albumTitle: $metadata['album'],
                 artistNames: $artistNames,
+                releaseYear: $metadata['year'],
+                genres: $metadata['genres'],
             );
         }
 
@@ -349,7 +367,6 @@ XPATH;
         }
 
         $absolute = $this->absoluteUrl($src);
-
         $candidates = [
             preg_replace('/_small(\.[a-z0-9]+)$/i', '_large$1', $absolute),
             preg_replace('/_small(\.[a-z0-9]+)$/i', '_big$1', $absolute),
@@ -567,7 +584,6 @@ XPATH;
 
         foreach (array_filter([$rowArtists, $pageArtistName]) as $artistLabel) {
             $quoted = preg_quote(trim($artistLabel), '/');
-
             $title = preg_replace('/^' . $quoted . '\s*[-,:—]*\s*/iu', '', $title) ?? $title;
             $title = preg_replace('/^' . $quoted . '\s*,\s*/iu', '', $title) ?? $title;
         }
@@ -578,19 +594,70 @@ XPATH;
         return trim($title);
     }
 
-    private function extractTitleAndAlbum(string $value): array
+    /**
+     * @return array{title:string,album:?string,year:?int,genres:string[]}
+     */
+    private function extractTitleMetadata(string $value): array
     {
         $value = html_entity_decode(trim($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
 
-        if (preg_match('/^(.*?)(?:\s*\(([^()]+)\))$/u', $value, $matches) === 1) {
-            $title = trim($matches[1]);
-            $album = trim($matches[2]);
+        $groups = [];
 
-            return [$title, $album !== '' ? $album : null];
+        while (preg_match('/^(.*)\(([^()]*)\)\s*$/u', $value, $matches) === 1) {
+            $inside = trim($matches[2]);
+
+            if ($inside === '') {
+                $value = trim($matches[1]);
+                continue;
+            }
+
+            array_unshift($groups, $inside);
+            $value = trim($matches[1]);
         }
 
-        return [$value, null];
+        $albumParts = [];
+        $genres = [];
+        $year = null;
+
+        foreach ($groups as $group) {
+            $tokens = preg_split('/\s*(?:,|\||•|\/|;|—|–)\s*/u', $group) ?: [];
+
+            foreach ($tokens as $token) {
+                $token = trim($token);
+
+                if ($token === '') {
+                    continue;
+                }
+
+                if ($this->isYearToken($token)) {
+                    $year = $year ?? (int) $token;
+                    continue;
+                }
+
+                if ($this->isGenreToken($token)) {
+                    $genres[] = $this->normalizeGenre($token);
+                    continue;
+                }
+
+                $albumParts[] = $token;
+            }
+        }
+
+        $title = trim($value);
+        $album = $albumParts !== [] ? trim(implode(', ', $albumParts)) : null;
+        $genres = collect($genres)
+            ->filter(fn (string $genre) => $genre !== '')
+            ->unique(fn (string $genre) => Str::lower($genre))
+            ->values()
+            ->all();
+
+        return [
+            'title' => $title,
+            'album' => $album,
+            'year' => $year,
+            'genres' => $genres,
+        ];
     }
 
     /**
@@ -614,7 +681,7 @@ XPATH;
             $names = array_merge($names, $this->splitArtistString($artistPrefix));
         }
 
-        if (preg_match('/(?:feat\.|ft\.|featuring)\s+(.+)$/iu', $rawTitle, $matches) === 1) {
+        if (preg_match('/(?:feat\.?|ft\.?|feature|featuring|with)\s+(.+)$/iu', $rawTitle, $matches) === 1) {
             $names = array_merge($names, $this->splitArtistString($matches[1]));
         }
 
@@ -654,10 +721,10 @@ XPATH;
     {
         $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $value = preg_replace('/\(([^()]*)\)/u', '', $value) ?? $value;
-        $value = str_ireplace([' feat. ', ' ft. ', ' featuring ', ' feat ', ' ft '], ',', $value);
-        $value = str_ireplace([' & ', ' x ', ' и ', ';'], ',', $value);
+        $value = str_ireplace([' feat. ', ' feat ', ' ft. ', ' ft ', ' feature ', ' featuring ', ' with '], ',', $value);
+        $value = preg_replace('/\s+(?:and|&|x|и)\s+/iu', ',', $value) ?? $value;
 
-        return collect(preg_split('/[,\/]/u', $value) ?: [])
+        return collect(preg_split('/[,\/;]/u', $value) ?: [])
             ->map(fn ($part) => trim((string) $part))
             ->filter(fn ($part) => $part !== '')
             ->values()
@@ -711,5 +778,68 @@ XPATH;
             'Upgrade-Insecure-Requests' => '1',
             'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
         ];
+    }
+
+    /**
+     * @return string[]
+     */
+    private function pathSegments(string $url): array
+    {
+        $path = trim((string) parse_url($url, PHP_URL_PATH), '/');
+
+        if ($path === '') {
+            return [];
+        }
+
+        return array_values(array_filter(explode('/', $path)));
+    }
+
+    private function normalizeArtistListingHref(string $href): ?string
+    {
+        if ($href === '') {
+            return null;
+        }
+
+        $absolute = $this->absoluteUrl($href);
+        $segments = $this->pathSegments($absolute);
+
+        if (count($segments) !== 3) {
+            return null;
+        }
+
+        if ($segments[0] !== 'collections' || $segments[1] !== 'artists') {
+            return null;
+        }
+
+        if ($segments[2] === '' || ctype_digit($segments[2])) {
+            return null;
+        }
+
+        return self::BASE_URL . '/collections/artists/' . $segments[2];
+    }
+
+    private function isYearToken(string $token): bool
+    {
+        return preg_match('/^(19|20)\d{2}$/', $token) === 1;
+    }
+
+    private function isGenreToken(string $token): bool
+    {
+        $normalized = Str::lower(trim($token));
+
+        foreach (self::GENRE_TOKENS as $genre) {
+            if ($normalized === Str::lower($genre)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function normalizeGenre(string $token): string
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $token) ?? $token);
+
+        return Str::title(Str::lower($normalized));
     }
 }

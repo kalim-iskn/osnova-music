@@ -15,6 +15,9 @@ class Track extends Model
         'duration_seconds',
         'audio_url',
         'original_link',
+        'audio_hash',
+        'release_year',
+        'genres',
         'cover_image_url',
         'track_number',
         'is_downloaded',
@@ -25,6 +28,8 @@ class Track extends Model
     {
         return [
             'duration_seconds' => 'integer',
+            'release_year' => 'integer',
+            'genres' => 'array',
             'track_number' => 'integer',
             'is_downloaded' => 'boolean',
             'plays_count' => 'integer',
