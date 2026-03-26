@@ -85,8 +85,8 @@ class GeniusCatalogSyncService
 
         foreach ($page->tracks as $parsedTrack) {
             try {
-                $trackResult = DB::transaction(function () use ($page, $parsedTrack, $songSummaries, $artist): array {
-                    $matchedSummary = $this->findBestSongMatch($page, $parsedTrack, $songSummaries);
+                $trackResult = DB::transaction(function () use ($page, $parsedTrack, $songSummaries, $artist, $geniusArtist): array {
+                    $matchedSummary = $this->findBestSongMatch($page, $parsedTrack, $songSummaries, $geniusArtist);
 
                     if (! $matchedSummary) {
                         return $this->saveFallbackTrackResult($page, $parsedTrack, $artist);
@@ -139,7 +139,7 @@ class GeniusCatalogSyncService
      * @param  array<int, array<string, mixed>>  $songSummaries
      * @return array<string, mixed>|null
      */
-    private function findBestSongMatch(ParsedArtistPage $page, ParsedTrack $parsedTrack, array $songSummaries): ?array
+    private function findBestSongMatch(ParsedArtistPage $page, ParsedTrack $parsedTrack, array $songSummaries, array $geniusArtist): ?array
     {
         $parsedTitle = GeniusNameMatcher::canonicalTrack($parsedTrack->title);
 
@@ -151,6 +151,10 @@ class GeniusCatalogSyncService
         $bestSummary = null;
 
         foreach ($songSummaries as $songSummary) {
+            if (! $this->primaryArtistMatchesPageArtist($songSummary, $page, $geniusArtist)) {
+                continue;
+            }
+
             $summaryTitle = GeniusNameMatcher::canonicalTrack((string) ($songSummary['title'] ?? ''));
 
             if ($summaryTitle === '') {
@@ -173,6 +177,46 @@ class GeniusCatalogSyncService
         }
 
         return $bestScore >= 0.84 ? $bestSummary : null;
+    }
+
+    private function primaryArtistMatchesPageArtist(array $songSummary, ParsedArtistPage $page, array $geniusArtist): bool
+    {
+        $primaryArtist = $this->primaryArtistPayload($songSummary);
+
+        if ($primaryArtist === null) {
+            return false;
+        }
+
+        $primaryArtistId = (int) ($primaryArtist['id'] ?? 0);
+        $matchedArtistId = (int) ($geniusArtist['id'] ?? 0);
+
+        if ($primaryArtistId > 0 && $matchedArtistId > 0 && $primaryArtistId === $matchedArtistId) {
+            return true;
+        }
+
+        $candidateNames = array_filter([
+            (string) ($primaryArtist['name'] ?? ''),
+            (string) ($songSummary['artist_names'] ?? ''),
+        ]);
+
+        return GeniusNameMatcher::bestArtistScore($page->artistName, $candidateNames) >= 0.92;
+    }
+
+    private function primaryArtistPayload(array $songPayload): ?array
+    {
+        $primaryArtist = $songPayload['primary_artist'] ?? null;
+
+        if (is_array($primaryArtist) && isset($primaryArtist['id'])) {
+            return $primaryArtist;
+        }
+
+        foreach ((array) ($songPayload['primary_artists'] ?? []) as $artist) {
+            if (is_array($artist) && isset($artist['id'])) {
+                return $artist;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -269,13 +313,25 @@ class GeniusCatalogSyncService
      */
     private function upsertPrimaryArtistFromMuzofond(ParsedArtistPage $page): array
     {
-        $artist = Artist::query()->where('slug', $page->artistSlug)->first();
+        $storedName = GeniusNameMatcher::storageValue($page->artistName);
+        $preferredSlugBase = $this->artistSlugBase($storedName);
+
+        $artist = Artist::query()
+            ->whereRaw('LOWER(name) = ?', [Str::lower($storedName)])
+            ->first();
+
+        if (! $artist) {
+            $artist = Artist::query()
+                ->where('slug', $preferredSlugBase)
+                ->first();
+        }
+
         $created = false;
 
         if (! $artist) {
             $artist = Artist::create([
-                'name' => GeniusNameMatcher::storageValue($page->artistName),
-                'slug' => $page->artistSlug,
+                'name' => $storedName,
+                'slug' => $this->uniqueArtistSlug($preferredSlugBase),
                 'image_url' => $page->imageUrl,
                 'description_preview' => null,
                 'genius_id' => null,
@@ -283,8 +339,11 @@ class GeniusCatalogSyncService
 
             $created = true;
         } else {
+            $preferredSlug = $this->uniqueArtistSlug($preferredSlugBase, $artist->id);
+
             $artist->forceFill([
-                'name' => $artist->name ?: GeniusNameMatcher::storageValue($page->artistName),
+                'name' => $storedName,
+                'slug' => $preferredSlug,
                 'image_url' => $artist->image_url ?: $page->imageUrl,
             ])->save();
         }
@@ -313,12 +372,14 @@ class GeniusCatalogSyncService
             }
         }
 
+        $slugBase = $this->artistSlugBase((string) ($payload['name'] ?? 'artist'));
+
         if (! $artist) {
             $created = true;
             $artist = new Artist();
-            $artist->slug = $this->uniqueArtistSlug(Str::slug((string) ($payload['slug'] ?? $payload['name'] ?? 'artist')) ?: 'artist');
-        } elseif (! $artist->slug) {
-            $artist->slug = $this->uniqueArtistSlug(Str::slug((string) ($payload['slug'] ?? $payload['name'] ?? 'artist')) ?: 'artist');
+            $artist->slug = $this->uniqueArtistSlug($slugBase);
+        } else {
+            $artist->slug = $this->uniqueArtistSlug($slugBase, $artist->id);
         }
 
         $artistPayload = GeniusNameMatcher::sanitizeForDatabase([
@@ -400,7 +461,10 @@ class GeniusCatalogSyncService
      */
     private function upsertTrackFromGenius(Artist $fallbackArtist, ParsedTrack $parsedTrack, array $songPayload): array
     {
+        $primaryPayload = $this->primaryArtistPayload($songPayload);
+
         $performerPayloads = collect(array_merge(
+            $primaryPayload ? [$primaryPayload] : [],
             (array) ($songPayload['primary_artists'] ?? []),
             (array) ($songPayload['featured_artists'] ?? []),
         ))
@@ -534,8 +598,7 @@ class GeniusCatalogSyncService
             return $artist;
         }
 
-        $baseSlug = Str::slug($storedName);
-        $baseSlug = $baseSlug !== '' ? $baseSlug : 'artist';
+        $baseSlug = $this->artistSlugBase($storedName);
 
         return Artist::create(GeniusNameMatcher::sanitizeForDatabase([
             'name' => $storedName,
@@ -664,12 +727,20 @@ class GeniusCatalogSyncService
         return $audioUrl === '' ? null : sha1($audioUrl);
     }
 
-    private function uniqueArtistSlug(string $baseSlug): string
+    private function artistSlugBase(string $name): string
+    {
+        return Str::slug(GeniusNameMatcher::storageValue($name)) ?: 'artist';
+    }
+
+    private function uniqueArtistSlug(string $baseSlug, ?int $ignoreArtistId = null): string
     {
         $slug = $baseSlug;
         $counter = 2;
 
-        while (Artist::query()->where('slug', $slug)->exists()) {
+        while (Artist::query()
+            ->when($ignoreArtistId !== null, fn ($query) => $query->whereKeyNot($ignoreArtistId))
+            ->where('slug', $slug)
+            ->exists()) {
             $slug = $baseSlug . '-' . $counter;
             $counter++;
         }

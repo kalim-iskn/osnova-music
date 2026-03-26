@@ -20,7 +20,6 @@ const props = defineProps({
 
 const runtime = ref(null);
 const runtimeLoading = ref(false);
-const runtimeError = ref(null);
 
 const displayGenres = computed(() => {
     const storedGenres = Array.isArray(props.track.genres) ? props.track.genres : [];
@@ -72,14 +71,12 @@ const fetchRuntime = async () => {
     }
 
     runtimeLoading.value = true;
-    runtimeError.value = null;
 
     try {
         const { data } = await window.axios.get(`/tracks/${props.track.id}/genius`);
         runtime.value = data;
     } catch {
         runtime.value = null;
-        runtimeError.value = null;
     } finally {
         runtimeLoading.value = false;
     }
@@ -91,14 +88,17 @@ onMounted(fetchRuntime);
 <template>
     <Head :title="track.title" />
 
-    <section class="hero-card hero-card--track">
-        <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover">
+    <section class="hero-card hero-card--track track-page__hero-card">
+        <Link v-if="currentAlbum?.slug" :href="`/albums/${currentAlbum.slug}`" class="track-page__cover-link">
+            <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover track-page__cover">
+        </Link>
+        <img v-else :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover track-page__cover">
 
         <div class="track-page__hero-body">
             <span class="eyebrow">Трек</span>
             <h1>{{ track.title }}</h1>
 
-            <p class="hero-card__description">
+            <p class="hero-card__description track-page__meta-line">
                 <TrackArtists :artists="currentArtists" />
                 <template v-if="currentAlbum">
                     <span class="hero-card__separator">•</span>
@@ -121,9 +121,9 @@ onMounted(fetchRuntime);
         </div>
     </section>
 
-    <section class="section-grid">
-        <div class="panel-card">
-            <div class="section-heading section-heading--tight">
+    <section class="section-grid track-page__grid">
+        <div class="panel-card track-page__panel">
+            <div class="section-heading section-heading--tight track-page__section-heading">
                 <div>
                     <span class="eyebrow">Описание</span>
                     <h2>О треке</h2>
@@ -150,8 +150,8 @@ onMounted(fetchRuntime);
             </div>
         </div>
 
-        <div class="panel-card">
-            <div class="section-heading section-heading--tight">
+        <div class="panel-card track-page__panel">
+            <div class="section-heading section-heading--tight track-page__section-heading">
                 <div>
                     <span class="eyebrow">Исполнители</span>
                     <h2>Участники трека</h2>
@@ -226,13 +226,28 @@ onMounted(fetchRuntime);
 </template>
 
 <style scoped>
-.track-page__hero-body {
-    display: grid;
-    gap: 1rem;
+.track-page__hero-card {
+    align-items: flex-start;
+}
+
+.track-page__cover-link,
+.track-page__cover {
+    display: block;
+    align-self: flex-start;
+}
+
+.track-page__hero-body,
+.track-page__panel,
+.track-page__section-heading {
     justify-items: start;
     text-align: left;
 }
 
+.track-page__grid {
+    align-items: start;
+}
+
+.track-page__meta-line,
 .track-page__chips,
 .track-page__links,
 .track-page__artist-socials {

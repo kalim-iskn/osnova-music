@@ -44,13 +44,50 @@ const resolvedArtists = computed(() => {
 <template>
     <span v-if="resolvedArtists.length" class="track-artists">
         <template v-for="(artist, index) in resolvedArtists" :key="artist.id ?? `${artist.name}-${index}`">
-            <span v-if="index" class="track-artists__separator">•</span>
-            <Link v-if="links && artist.slug" :href="`/artists/${artist.slug}`" class="track-artists__link">
+            <span v-if="index" class="track-artists__separator" aria-hidden="true">•</span>
+            <Link
+                v-if="links && artist.slug"
+                :href="`/artists/${artist.slug}`"
+                class="track-artists__link"
+                @click.stop
+            >
                 {{ artist.name }}
             </Link>
-            <span v-else>{{ artist.name }}</span>
+            <span v-else class="track-artists__text">{{ artist.name }}</span>
         </template>
     </span>
 
     <span v-else class="track-artists__fallback">Неизвестный исполнитель</span>
 </template>
+
+<style scoped>
+.track-artists {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.track-artists__separator {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.track-artists__link,
+.track-artists__text,
+.track-artists__fallback {
+    min-width: 0;
+}
+
+.track-artists__link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.track-artists__link:hover {
+    color: #fff;
+    opacity: 1;
+}
+</style>

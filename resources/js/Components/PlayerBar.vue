@@ -5,6 +5,7 @@ import { usePlayerStore } from '../stores/player';
 import QueueDrawer from './QueueDrawer.vue';
 import LikeButton from './LikeButton.vue';
 import TrackArtists from './TrackArtists.vue';
+import TrackInfoMenu from './TrackInfoMenu.vue';
 import { formatSeconds } from '../utils/time';
 
 const audioRef = ref(null);
@@ -18,7 +19,7 @@ const currentTrack = computed(() => player.currentTrack);
 const totalDuration = computed(() => player.duration || currentTrack.value?.duration_seconds || 0);
 const progress = computed({
     get: () => Math.min(player.currentTime, totalDuration.value),
-    set: (value) => player.seekTo(value),
+    set: (value) => player.seekTo(Number(value)),
 });
 const volume = computed({
     get: () => Math.round(player.volume * 100),
@@ -49,7 +50,9 @@ const repeatLabel = computed(() => {
                     <img :src="currentTrack.cover_image_url" :alt="currentTrack.title" class="player-bar__cover">
 
                     <div class="player-bar__meta">
-                        <strong class="player-bar__title">{{ currentTrack.title }}</strong>
+                        <Link :href="currentTrack.show_url ?? `/tracks/${currentTrack.id}`" class="player-bar__title-link">
+                            <strong class="player-bar__title">{{ currentTrack.title }}</strong>
+                        </Link>
 
                         <div class="player-bar__track-meta">
                             <TrackArtists :track="currentTrack" />
@@ -67,7 +70,7 @@ const repeatLabel = computed(() => {
                 </div>
 
                 <div class="player-bar__controls" aria-label="Управление плеером">
-                    <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()">
+                    <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()" aria-label="Предыдущий трек">
                         ⏮
                     </button>
 
@@ -75,17 +78,20 @@ const repeatLabel = computed(() => {
                         class="player-button player-button--primary"
                         type="button"
                         :disabled="!currentTrack"
+                        :aria-label="player.isPlaying ? 'Пауза' : 'Воспроизвести'"
                         @click="player.togglePlayback()"
                     >
                         {{ player.isPlaying ? '❚❚' : '▶' }}
                     </button>
 
-                    <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()">
+                    <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()" aria-label="Следующий трек">
                         ⏭
                     </button>
                 </div>
 
                 <div class="player-bar__secondary">
+                    <TrackInfoMenu v-if="currentTrack" :track="currentTrack" compact />
+
                     <button
                         class="icon-button player-bar__repeat-button"
                         :class="{
@@ -149,9 +155,45 @@ const repeatLabel = computed(() => {
 </template>
 
 <style scoped>
+.player-bar__top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 1rem;
+}
+
+.player-bar__track {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.9rem;
+    align-items: center;
+}
+
+.player-bar__meta {
+    min-width: 0;
+}
+
+.player-bar__title-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.player-bar__title-link:hover {
+    color: #fff;
+}
+
 .player-bar__controls {
+    grid-column: 2;
     justify-self: center;
     margin-inline: auto;
+}
+
+.player-bar__secondary {
+    justify-self: end;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
 }
 
 .player-bar__timeline input,
@@ -164,5 +206,27 @@ const repeatLabel = computed(() => {
     flex-wrap: wrap;
     gap: 0.35rem;
     align-items: center;
+}
+
+@media (max-width: 980px) {
+    .player-bar__top {
+        grid-template-columns: 1fr;
+    }
+
+    .player-bar__track,
+    .player-bar__controls,
+    .player-bar__secondary {
+        grid-column: auto;
+        justify-self: stretch;
+    }
+
+    .player-bar__controls,
+    .player-bar__secondary {
+        justify-content: center;
+    }
+
+    .player-bar__track {
+        justify-content: start;
+    }
 }
 </style>

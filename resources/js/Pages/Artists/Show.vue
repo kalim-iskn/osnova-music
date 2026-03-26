@@ -40,10 +40,10 @@ onMounted(fetchRuntime);
 <template>
     <Head :title="artist.name" />
 
-    <section class="hero-card hero-card--artist">
-        <img :src="artist.image_url" :alt="artist.name" class="hero-card__avatar">
+    <section class="hero-card hero-card--artist artist-page__hero-card">
+        <img :src="artist.image_url" :alt="artist.name" class="hero-card__avatar artist-page__avatar">
 
-        <div>
+        <div class="artist-page__hero-body">
             <span class="eyebrow">Исполнитель</span>
             <h1>{{ artist.name }}</h1>
             <p class="hero-card__description hero-card__description--stacked">
@@ -51,7 +51,7 @@ onMounted(fetchRuntime);
                 <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
             </p>
 
-            <p v-if="artistDescription" class="hero-card__description hero-card__description--text">
+            <p v-if="artistDescription" class="hero-card__description hero-card__description--text artist-page__description">
                 {{ artistDescription }}
             </p>
 
@@ -70,7 +70,7 @@ onMounted(fetchRuntime);
         </div>
     </section>
 
-    <section class="section-grid">
+    <section class="section-grid artist-page__grid">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
                 <div>
@@ -117,10 +117,32 @@ onMounted(fetchRuntime);
 </template>
 
 <style scoped>
+.artist-page__hero-card {
+    align-items: flex-start;
+}
+
+.artist-page__avatar {
+    align-self: flex-start;
+}
+
+.artist-page__hero-body {
+    display: grid;
+    gap: 1rem;
+    justify-items: start;
+    text-align: left;
+}
+
+.artist-page__grid {
+    align-items: start;
+}
+
+.artist-page__description {
+    text-align: left;
+}
+
 .artist-page__socials {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
-    margin-top: 1rem;
 }
 </style>
