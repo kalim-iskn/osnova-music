@@ -18,10 +18,14 @@ class Track extends Model
         'audio_hash',
         'release_year',
         'genres',
+        'language',
+        'description_preview',
+        'genius_url',
         'cover_image_url',
         'track_number',
         'is_downloaded',
         'plays_count',
+        'genius_id',
     ];
 
     protected function casts(): array
@@ -33,6 +37,7 @@ class Track extends Model
             'track_number' => 'integer',
             'is_downloaded' => 'boolean',
             'plays_count' => 'integer',
+            'genius_id' => 'integer',
         ];
     }
 

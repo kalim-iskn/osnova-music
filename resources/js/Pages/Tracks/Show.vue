@@ -1,0 +1,308 @@
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { Head, Link } from '@inertiajs/vue3';
+import AppLayout from '../../Layouts/AppLayout.vue';
+import TrackArtists from '../../Components/TrackArtists.vue';
+import TrackRow from '../../Components/TrackRow.vue';
+
+defineOptions({ layout: AppLayout });
+
+const props = defineProps({
+    track: {
+        type: Object,
+        required: true,
+    },
+    relatedTracks: {
+        type: Array,
+        default: () => [],
+    },
+});
+
+const runtime = ref(null);
+const runtimeLoading = ref(false);
+const runtimeError = ref(null);
+
+const displayGenres = computed(() => {
+    const storedGenres = Array.isArray(props.track.genres) ? props.track.genres : [];
+    const runtimeGenres = Array.isArray(runtime.value?.song?.genres) ? runtime.value.song.genres : [];
+
+    return [...new Set([...storedGenres, ...runtimeGenres])].filter(Boolean);
+});
+
+const languageLabel = computed(() => {
+    const language = runtime.value?.song?.language ?? props.track.language ?? null;
+
+    if (!language) {
+        return null;
+    }
+
+    const labels = {
+        ru: 'Русский',
+        en: 'English',
+    };
+
+    return labels[language] ?? String(language).toUpperCase();
+});
+
+const trackDescription = computed(() => runtime.value?.song?.description_preview ?? props.track.description_preview ?? null);
+const currentAlbum = computed(() => runtime.value?.song?.album ?? props.track.album ?? null);
+const currentArtists = computed(() => runtime.value?.artists?.length ? runtime.value.artists : props.track.artists);
+
+const fetchRuntime = async () => {
+    if (!props.track.genius_id || !window.axios) {
+        return;
+    }
+
+    runtimeLoading.value = true;
+    runtimeError.value = null;
+
+    try {
+        const { data } = await window.axios.get(`/tracks/${props.track.id}/genius`);
+        runtime.value = data;
+    } catch (error) {
+        runtimeError.value = error?.response?.data?.message ?? 'Не удалось загрузить расширенные данные Genius.';
+    } finally {
+        runtimeLoading.value = false;
+    }
+};
+
+onMounted(fetchRuntime);
+</script>
+
+<template>
+    <Head :title="track.title" />
+
+    <section class="hero-card hero-card--track">
+        <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover">
+
+        <div class="track-page__hero-body">
+            <span class="eyebrow">Трек</span>
+            <h1>{{ track.title }}</h1>
+
+            <p class="hero-card__description">
+                <TrackArtists :artists="currentArtists" />
+                <template v-if="currentAlbum">
+                    <span class="hero-card__separator">•</span>
+                    <Link v-if="currentAlbum.slug" :href="`/albums/${currentAlbum.slug}`">{{ currentAlbum.title }}</Link>
+                    <span v-else>{{ currentAlbum.title }}</span>
+                </template>
+                <template v-if="track.release_year">
+                    <span class="hero-card__separator">•</span>
+                    <span>{{ track.release_year }}</span>
+                </template>
+            </p>
+
+            <div class="track-page__chips">
+                <span class="badge">{{ track.duration_human }}</span>
+                <span v-if="languageLabel" class="badge">{{ languageLabel }}</span>
+                <span v-for="genre in displayGenres" :key="genre" class="badge">{{ genre }}</span>
+            </div>
+
+            <div v-if="runtimeLoading" class="track-page__status">Загружаю расширенные данные Genius…</div>
+            <div v-else-if="runtimeError" class="track-page__status track-page__status--error">{{ runtimeError }}</div>
+        </div>
+    </section>
+
+    <section class="section-grid">
+        <div class="panel-card">
+            <div class="section-heading section-heading--tight">
+                <div>
+                    <span class="eyebrow">Описание</span>
+                    <h2>О треке</h2>
+                </div>
+            </div>
+
+            <p v-if="trackDescription" class="track-page__description">
+                {{ trackDescription }}
+            </p>
+            <p v-else class="track-page__description track-page__description--muted">
+                Для этого трека пока нет краткого описания.
+            </p>
+
+            <div class="track-page__links">
+                <a
+                    v-if="runtime?.song?.url || track.genius_url"
+                    :href="runtime?.song?.url ?? track.genius_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ghost-button"
+                >
+                    Genius: текст и аннотации
+                </a>
+
+                <a
+                    v-if="runtime?.song?.youtube_url"
+                    :href="runtime.song.youtube_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ghost-button"
+                >
+                    YouTube
+                </a>
+
+                <a
+                    v-if="runtime?.song?.soundcloud_url"
+                    :href="runtime.song.soundcloud_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ghost-button"
+                >
+                    SoundCloud
+                </a>
+
+                <a
+                    v-if="runtime?.song?.apple_music_player_url"
+                    :href="runtime.song.apple_music_player_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="ghost-button"
+                >
+                    Apple Music
+                </a>
+            </div>
+        </div>
+
+        <div class="panel-card">
+            <div class="section-heading section-heading--tight">
+                <div>
+                    <span class="eyebrow">Исполнители</span>
+                    <h2>Участники трека</h2>
+                </div>
+            </div>
+
+            <div class="track-page__artist-grid">
+                <article
+                    v-for="artist in currentArtists"
+                    :key="artist.id ?? artist.name"
+                    class="track-page__artist-card"
+                >
+                    <img
+                        :src="artist.image_url ?? track.cover_image_url"
+                        :alt="artist.name"
+                        class="track-page__artist-avatar"
+                    >
+
+                    <div>
+                        <h3 class="track-page__artist-name">
+                            <Link v-if="artist.slug" :href="`/artists/${artist.slug}`">
+                                {{ artist.name }}
+                            </Link>
+                            <span v-else>{{ artist.name }}</span>
+                        </h3>
+
+                        <div v-if="artist.social_links" class="track-page__artist-socials">
+                            <a
+                                v-for="(value, key) in artist.social_links"
+                                :key="key"
+                                :href="`https://${key}.com/${value}`"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                {{ key }}: {{ value }}
+                            </a>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="section-block">
+        <div class="panel-card">
+            <div class="section-heading section-heading--tight">
+                <div>
+                    <span class="eyebrow">Похожие</span>
+                    <h2>Ещё послушать</h2>
+                </div>
+                <span class="badge">{{ relatedTracks.length }}</span>
+            </div>
+
+            <div class="track-list">
+                <TrackRow
+                    v-for="relatedTrack in relatedTracks"
+                    :key="relatedTrack.id"
+                    :track="relatedTrack"
+                    :queue="relatedTracks"
+                />
+            </div>
+        </div>
+    </section>
+</template>
+
+<style scoped>
+.track-page__hero-body {
+    display: grid;
+    gap: 1rem;
+}
+
+.track-page__chips,
+.track-page__links,
+.track-page__artist-socials {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.track-page__status {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.track-page__status--error {
+    color: #ffb4b4;
+}
+
+.track-page__description {
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.track-page__description--muted {
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.track-page__artist-grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.track-page__artist-card {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem;
+    border-radius: 1.25rem;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.track-page__artist-avatar {
+    width: 72px;
+    height: 72px;
+    border-radius: 1rem;
+    object-fit: cover;
+}
+
+.track-page__artist-name {
+    margin: 0 0 0.5rem;
+}
+
+.track-page__artist-socials a {
+    color: rgba(255, 255, 255, 0.74);
+    text-decoration: none;
+}
+
+.track-page__artist-socials a:hover {
+    color: white;
+}
+
+@media (max-width: 720px) {
+    .track-page__artist-card {
+        grid-template-columns: 56px minmax(0, 1fr);
+    }
+
+    .track-page__artist-avatar {
+        width: 56px;
+        height: 56px;
+    }
+}
+</style>

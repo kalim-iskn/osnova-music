@@ -32,6 +32,10 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
                 <span>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }} в каталоге.</span>
                 <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
             </p>
+
+            <p v-if="artist.description_preview" class="hero-card__description hero-card__description--text">
+                {{ artist.description_preview }}
+            </p>
         </div>
     </section>
 
@@ -46,7 +50,13 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
             </div>
 
             <div class="track-list">
-                <TrackRow v-for="track in trackItems" :key="track.id" :track="track" :queue="trackItems" :show-artist="false" />
+                <TrackRow
+                    v-for="track in trackItems"
+                    :key="track.id"
+                    :track="track"
+                    :queue="trackItems"
+                    :show-artist="false"
+                />
             </div>
 
             <PaginationBar :pagination="pagination" />

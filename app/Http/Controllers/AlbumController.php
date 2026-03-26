@@ -17,7 +17,7 @@ class AlbumController extends Controller
         $album->loadCount('tracks');
 
         $tracks = $album->tracks()
-            ->with(['artist', 'album'])
+            ->with(['artist', 'artists', 'album'])
             ->orderByRaw('track_number IS NULL, track_number ASC')
             ->orderBy('id')
             ->paginate(20)

@@ -18,6 +18,7 @@ class AlbumResource extends JsonResource
             'id' => $this->id,
             'title' => $this->title,
             'slug' => $this->slug,
+            'genius_id' => $this->genius_id,
             'cover_image_url' => $coverImageUrl,
             'release_date' => $this->release_date?->toDateString(),
             'artist' => $this->whenLoaded('artist', fn () => [
@@ -25,7 +26,7 @@ class AlbumResource extends JsonResource
                 'name' => $this->artist->name,
                 'slug' => $this->artist->slug,
             ]),
-            'tracks_count' => $this->whenCounted('tracks'),
+            'tracks_count' => (int) ($this->tracks_count ?? 0),
         ];
     }
 }

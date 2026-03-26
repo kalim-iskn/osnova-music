@@ -7,6 +7,8 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\SearchController;
+use App\Http\Controllers\TrackController;
+use App\Http\Controllers\TrackGeniusController;
 use App\Http\Controllers\TrackLikeController;
 use App\Http\Controllers\TrackPlayController;
 use App\Http\Controllers\TrackStreamController;
@@ -16,6 +18,8 @@ Route::get('/', HomeController::class)->name('home');
 Route::get('/search', [SearchController::class, 'index'])->name('search');
 Route::get('/artists/{artist:slug}', [ArtistController::class, 'show'])->name('artists.show');
 Route::get('/albums/{album:slug}', [AlbumController::class, 'show'])->name('albums.show');
+Route::get('/tracks/{track}', [TrackController::class, 'show'])->name('tracks.show');
+Route::get('/tracks/{track}/genius', TrackGeniusController::class)->name('tracks.genius');
 Route::get('/tracks/{track}/stream', TrackStreamController::class)->name('tracks.stream');
 Route::post('/tracks/{track}/play', TrackPlayController::class)->name('tracks.play');
 

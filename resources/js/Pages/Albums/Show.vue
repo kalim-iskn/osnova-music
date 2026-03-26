@@ -47,7 +47,13 @@ const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tra
             </div>
 
             <div class="track-list">
-                <TrackRow v-for="track in trackItems" :key="track.id" :track="track" :queue="trackItems" :show-album="false" />
+                <TrackRow
+                    v-for="track in trackItems"
+                    :key="track.id"
+                    :track="track"
+                    :queue="trackItems"
+                    :show-album="false"
+                />
             </div>
 
             <PaginationBar :pagination="pagination" />

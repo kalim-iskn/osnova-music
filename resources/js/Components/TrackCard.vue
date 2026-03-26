@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
+import TrackArtists from './TrackArtists.vue';
 
 const props = defineProps({
     track: {
@@ -40,11 +41,15 @@ const toggleTrack = async () => {
 
         <div class="track-card__body">
             <div class="track-card__meta">
-                <h3 class="track-card__title">{{ track.title }}</h3>
+                <h3 class="track-card__title">
+                    <Link :href="track.show_url ?? `/tracks/${track.id}`">
+                        {{ track.title }}
+                    </Link>
+                </h3>
 
-                <Link class="track-card__artist" :href="`/artists/${track.artist.slug}`">
-                    {{ track.artist.name }}
-                </Link>
+                <div class="track-card__artist">
+                    <TrackArtists :track="track" />
+                </div>
 
                 <p v-if="track.album" class="track-card__album">
                     {{ track.album.title }}

@@ -24,11 +24,13 @@ class ArtistController extends Controller
         $albums = $artist->albums()
             ->with(['artist'])
             ->withCount('tracks')
+            ->latest('release_date')
             ->latest('id')
             ->get();
 
         $tracks = $creditedTracksQuery
-            ->with(['artist', 'album'])
+            ->with(['artist', 'artists', 'album'])
+            ->latest('release_year')
             ->latest('id')
             ->paginate(20)
             ->withQueryString();

@@ -12,7 +12,16 @@ class Artist extends Model
         'name',
         'slug',
         'image_url',
+        'genius_id',
+        'description_preview',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'genius_id' => 'integer',
+        ];
+    }
 
     public function albums(): HasMany
     {

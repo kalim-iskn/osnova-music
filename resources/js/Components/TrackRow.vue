@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
+import TrackArtists from './TrackArtists.vue';
 
 const props = defineProps({
     track: {
@@ -50,14 +51,18 @@ const addToQueue = () => {
         </button>
 
         <div class="track-row__meta">
-            <button type="button" class="track-row__title" @click="toggleTrack">
-                {{ track.title }}
-            </button>
+            <div class="track-row__title-row">
+                <Link :href="track.show_url ?? `/tracks/${track.id}`" class="track-row__title-link">
+                    {{ track.title }}
+                </Link>
+
+                <button type="button" class="track-row__title-play" @click="toggleTrack">
+                    {{ isPlaying ? '❚❚' : '▶' }}
+                </button>
+            </div>
 
             <div class="track-row__details">
-                <Link v-if="showArtist" :href="`/artists/${track.artist.slug}`">
-                    {{ track.artist.name }}
-                </Link>
+                <TrackArtists v-if="showArtist" :track="track" />
 
                 <template v-if="showArtist && showAlbum && track.album">
                     <span class="track-row__separator">•</span>
@@ -67,7 +72,7 @@ const addToQueue = () => {
                     {{ track.album.title }}
                 </Link>
 
-                <span v-if="!track.album">Сингл</span>
+                <span v-else-if="showAlbum && !track.album">Сингл</span>
             </div>
         </div>
 

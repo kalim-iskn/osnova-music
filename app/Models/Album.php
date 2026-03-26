@@ -20,12 +20,14 @@ class Album extends Model
         'slug',
         'cover_image_url',
         'release_date',
+        'genius_id',
     ];
 
     protected function casts(): array
     {
         return [
             'release_date' => 'date',
+            'genius_id' => 'integer',
         ];
     }
 
