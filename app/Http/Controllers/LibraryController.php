@@ -14,8 +14,10 @@ class LibraryController extends Controller
     {
         $tracks = $request->user()
             ->likedTracks()
-            ->with(['artist', 'album'])
-            ->latest('tracks.id')
+            ->with(['artist', 'artists', 'album'])
+            ->orderByDesc('tracks.plays_count')
+            ->orderByDesc('tracks.genius_pageviews')
+            ->orderByDesc('tracks.id')
             ->paginate(20)
             ->withQueryString();
 

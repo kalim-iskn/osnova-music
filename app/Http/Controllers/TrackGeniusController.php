@@ -67,23 +67,14 @@ class TrackGeniusController extends Controller
                     'description_preview' => $song['description_preview'] ?? null,
                     'language' => GeniusNameMatcher::resolveLanguageCode((array) ($song['tags'] ?? []), $song['language'] ?? null),
                     'genres' => GeniusNameMatcher::extractGenres((array) ($song['tags'] ?? [])),
-                    'release_date' => $song['release_date_for_display'] ?? $song['release_date'] ?? null,
-                    'is_single' => empty($song['album']),
-                    'cover_image_url' => ! empty($song['album'])
-                        ? null
-                        : ($song['song_art_image_thumbnail_url'] ?? $song['song_art_image_url'] ?? $song['header_image_url'] ?? null),
+                    'release_date' => $song['release_date'] ?? null,
+                    'is_single' => ! is_array($song['album'] ?? null),
+                    'cover_image_url' => $song['song_art_image_url'] ?? $song['header_image_url'] ?? null,
                     'url' => $song['url'] ?? null,
-                    'album' => ! empty($song['album'])
+                    'album' => is_array($song['album'] ?? null)
                         ? [
                             'id' => (int) ($song['album']['id'] ?? 0),
                             'title' => GeniusNameMatcher::storageValue((string) ($song['album']['name'] ?? $song['album']['title'] ?? '')),
-                            'cover_image_url' => $song['album']['cover_art_thumbnail_url']
-                                ?? $song['album']['cover_art_url']
-                                ?? null,
-                            'release_date' => $song['album']['release_date_for_display']
-                                ?? $song['album']['release_date']
-                                ?? null,
-                            'url' => $song['album']['url'] ?? null,
                         ]
                         : null,
                 ],

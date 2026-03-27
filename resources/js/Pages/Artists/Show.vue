@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
+import SocialIconLink from '../../Components/SocialIconLink.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { formatCount, formatNumberedCount } from '../../utils/pluralize';
 
@@ -41,7 +42,7 @@ onMounted(fetchRuntime);
     <Head :title="artist.name" />
 
     <section class="hero-card hero-card--artist artist-page__hero-card">
-        <img :src="artist.image_url" :alt="artist.name" class="hero-card__avatar artist-page__avatar">
+        <img :src="artist.image_url" :alt="artist.name" class="hero-card__avatar artist-page__hero-cover">
 
         <div class="artist-page__hero-body">
             <span class="eyebrow">Исполнитель</span>
@@ -51,26 +52,22 @@ onMounted(fetchRuntime);
                 <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
             </p>
 
-            <p v-if="artistDescription" class="hero-card__description hero-card__description--text artist-page__description">
+            <p v-if="artistDescription" class="hero-card__description hero-card__description--text">
                 {{ artistDescription }}
             </p>
 
             <div v-if="Object.keys(artistSocialLinks).length" class="artist-page__socials">
-                <a
+                <SocialIconLink
                     v-for="(value, key) in artistSocialLinks"
                     :key="key"
-                    :href="`https://${key}.com/${value}`"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ghost-button ghost-button--small"
-                >
-                    {{ key }}
-                </a>
+                    :network="key"
+                    :value="value"
+                />
             </div>
         </div>
     </section>
 
-    <section class="section-grid artist-page__grid">
+    <section class="section-grid">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
                 <div>
@@ -121,23 +118,14 @@ onMounted(fetchRuntime);
     align-items: flex-start;
 }
 
-.artist-page__avatar {
+.artist-page__hero-cover {
     align-self: flex-start;
 }
 
 .artist-page__hero-body {
     display: grid;
     gap: 1rem;
-    justify-items: start;
-    text-align: left;
-}
-
-.artist-page__grid {
-    align-items: start;
-}
-
-.artist-page__description {
-    text-align: left;
+    align-content: start;
 }
 
 .artist-page__socials {

@@ -38,10 +38,10 @@ onMounted(fetchRuntime);
 <template>
     <Head :title="album.title" />
 
-    <section class="hero-card hero-card--album">
-        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover">
+    <section class="hero-card hero-card--album album-page__hero-card">
+        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover album-page__hero-cover">
 
-        <div>
+        <div class="album-page__hero-body">
             <span class="eyebrow">Альбом</span>
             <h1>{{ album.title }}</h1>
 
@@ -82,3 +82,19 @@ onMounted(fetchRuntime);
         </div>
     </section>
 </template>
+
+<style scoped>
+.album-page__hero-card {
+    align-items: flex-start;
+}
+
+.album-page__hero-cover {
+    align-self: flex-start;
+}
+
+.album-page__hero-body {
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+}
+</style>
