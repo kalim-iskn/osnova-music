@@ -173,7 +173,7 @@ class GeniusNameMatcher
     {
         $scores = collect($candidates)
             ->filter(fn ($value) => is_string($value) && trim($value) !== '')
-            ->map(fn (string $candidate) => self::score($needle, $candidate))
+            ->map(fn (string $candidate) => self::artistScore($needle, $candidate))
             ->values()
             ->all();
 
@@ -251,6 +251,129 @@ class GeniusNameMatcher
             ->unique()
             ->values()
             ->all();
+    }
+
+
+    /**
+     * @return string[]
+     */
+    public static function artistSearchQueries(string $value): array
+    {
+        $storage = self::storageValue($value);
+        $variants = [$storage];
+
+        if (preg_match('/^(?P<base>.*?)\s*[\(\[\{].*?[\)\]\}]\s*$/u', $storage, $matches) === 1) {
+            $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
+
+            if ($base !== '') {
+                $variants[] = $base;
+            }
+        }
+
+        if (preg_match_all('/[\(\[\{]([^\)\]\}]*)[\)\]\}]/u', $storage, $matches) === 1 || !empty($matches[1])) {
+            foreach ($matches[1] as $inner) {
+                $clean = self::cleanWhitespace((string) $inner);
+
+                if ($clean !== '') {
+                    $variants[] = $clean;
+                }
+            }
+        }
+
+        foreach (array_values($variants) as $variant) {
+            $transliterated = self::transliterateCyrillic($variant);
+
+            if ($transliterated !== '') {
+                $variants[] = $transliterated;
+            }
+        }
+
+        return collect($variants)
+            ->map(fn (string $item) => self::cleanWhitespace($item))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private static function transliterateCyrillic(string $value): string
+    {
+        $value = self::cleanWhitespace($value);
+
+        if ($value === '') {
+            return '';
+        }
+
+        $map = [
+            'а' => 'a', 'б' => 'b', 'в' => 'v', 'г' => 'g', 'д' => 'd', 'е' => 'e', 'ё' => 'e',
+            'ж' => 'zh', 'з' => 'z', 'и' => 'i', 'й' => 'y', 'к' => 'k', 'л' => 'l', 'м' => 'm',
+            'н' => 'n', 'о' => 'o', 'п' => 'p', 'р' => 'r', 'с' => 's', 'т' => 't', 'у' => 'u',
+            'ф' => 'f', 'х' => 'h', 'ц' => 'ts', 'ч' => 'ch', 'ш' => 'sh', 'щ' => 'sch',
+            'ъ' => '', 'ы' => 'y', 'ь' => '', 'э' => 'e', 'ю' => 'yu', 'я' => 'ya',
+        ];
+
+        $normalized = Str::lower($value);
+        $normalized = strtr($normalized, $map);
+        $normalized = Str::ascii($normalized);
+        $normalized = preg_replace('/[^a-z0-9\s-]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s{2,}/u', ' ', $normalized) ?? $normalized;
+
+        return trim($normalized);
+    }
+
+    private static function artistVariants(string $value): array
+    {
+        $variants = array_merge(
+            [self::storageValue($value)],
+            self::artistSearchQueries($value),
+        );
+
+        return collect($variants)
+            ->map(fn (string $variant) => self::normalizeLoose($variant))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private static function artistScore(string $left, string $right): float
+    {
+        $leftVariants = self::artistVariants($left);
+        $rightVariants = self::artistVariants($right);
+        $best = 0.0;
+
+        foreach ($leftVariants as $leftVariant) {
+            foreach ($rightVariants as $rightVariant) {
+                if ($leftVariant === '' || $rightVariant === '') {
+                    continue;
+                }
+
+                if ($leftVariant === $rightVariant) {
+                    return 1.0;
+                }
+
+                if (preg_match('/(^|\s)' . preg_quote($leftVariant, '/') . '(\s|$)/u', $rightVariant) === 1) {
+                    $best = max($best, 0.96);
+                }
+
+                if (preg_match('/(^|\s)' . preg_quote($rightVariant, '/') . '(\s|$)/u', $leftVariant) === 1) {
+                    $best = max($best, 0.94);
+                }
+
+                similar_text($leftVariant, $rightVariant, $percent);
+                $similarity = $percent / 100;
+
+                $lengthDelta = abs(strlen($leftVariant) - strlen($rightVariant));
+
+                if ($lengthDelta >= 2 && (str_starts_with($leftVariant, $rightVariant) || str_starts_with($rightVariant, $leftVariant))) {
+                    $similarity = min($similarity, 0.79);
+                }
+
+                $best = max($best, $similarity);
+            }
+        }
+
+        return round($best, 4);
     }
 
     private static function cleanWhitespace(string $value): string

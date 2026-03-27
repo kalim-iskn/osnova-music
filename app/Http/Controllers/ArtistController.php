@@ -22,14 +22,14 @@ class ArtistController extends Controller
         $artist->setAttribute('plays_count', (int) (clone $creditedTracksQuery)->sum('plays_count'));
 
         $albums = $artist->albums()
-            ->with(['artist'])
+            ->with(['artist', 'artists'])
             ->withCount('tracks')
             ->latest('release_date')
             ->latest('id')
             ->get();
 
         $tracks = $creditedTracksQuery
-            ->with(['artist', 'artists', 'album'])
+            ->with(['artist', 'artists', 'album', 'album.artists'])
             ->popular()
             ->paginate(20)
             ->withQueryString();

@@ -15,7 +15,7 @@ class TrackController extends Controller
         $track->load([
             'artist',
             'artists',
-            'album.artist',
+            'album.artist', 'album.artists',
         ]);
 
         $relatedTracks = Track::query()
@@ -33,7 +33,7 @@ class TrackController extends Controller
                     $query->whereHas('artists', fn (Builder $artistQuery) => $artistQuery->whereIn('artists.id', $artistIds));
                 }
             })
-            ->with(['artist', 'artists', 'album'])
+            ->with(['artist', 'artists', 'album', 'album.artists'])
             ->popular()
             ->limit(12)
             ->get();

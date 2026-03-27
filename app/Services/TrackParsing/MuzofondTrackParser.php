@@ -146,7 +146,7 @@ class MuzofondTrackParser
 
         return new ParsedArtistPage(
             artistName: $artistName,
-            artistSlug: $slug,
+            artistSlug: Str::slug($artistName) ?: $slug,
             imageUrl: $imageUrl,
             tracks: $tracks,
         );
@@ -489,6 +489,8 @@ class MuzofondTrackParser
     private function extractTrackMetadata(string $rawTrackTitle, array $genresFromDescription): array
     {
         $title = $this->normalizeText($rawTrackTitle);
+        $title = preg_replace('/(новинки|new|новое)/iu', '', $title) ?? $title;
+        $title = $this->normalizeText($title);
         $album = null;
         $year = null;
 
@@ -556,6 +558,12 @@ class MuzofondTrackParser
 
                 break;
             }
+        }
+
+        $normalizedMeta = Str::lower($meta);
+
+        if (in_array($normalizedMeta, ['новинки', 'new', 'новое', 'news'], true)) {
+            $meta = '';
         }
 
         $album = $meta !== '' ? $meta : null;

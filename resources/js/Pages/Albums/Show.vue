@@ -18,6 +18,7 @@ const trackItems = computed(() => Array.isArray(props.tracks) ? props.tracks : p
 const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tracks);
 const albumDescription = computed(() => runtime.value?.album?.description_preview ?? null);
 const displayReleaseDate = computed(() => runtime.value?.album?.release_date ?? props.album.release_date ?? null);
+const albumArtists = computed(() => Array.isArray(props.album?.artists) && props.album.artists.length ? props.album.artists : (props.album?.artist ? [props.album.artist] : []));
 
 const fetchRuntime = async () => {
     if (!props.album?.genius_id || !window.axios) {
@@ -45,8 +46,12 @@ onMounted(fetchRuntime);
             <span class="eyebrow">Альбом</span>
             <h1>{{ album.title }}</h1>
 
-            <p class="hero-card__description">
-                <Link :href="`/artists/${album.artist.slug}`">{{ album.artist.name }}</Link>
+            <p class="hero-card__description album-page__artists-row">
+                <template v-for="(artist, index) in albumArtists" :key="artist.id ?? artist.slug ?? artist.name ?? index">
+                    <span v-if="index" class="hero-card__separator">•</span>
+                    <Link v-if="artist.slug" :href="`/artists/${artist.slug}`">{{ artist.name }}</Link>
+                    <span v-else>{{ artist.name }}</span>
+                </template>
                 <span class="hero-card__separator">•</span>
                 <span>{{ formatCount(album.tracks_count, ['трек', 'трека', 'треков']) }}</span>
                 <template v-if="displayReleaseDate">
@@ -85,7 +90,10 @@ onMounted(fetchRuntime);
 
 <style scoped>
 .album-page__hero-card {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     align-items: flex-start;
+    gap: 1.5rem;
 }
 
 .album-page__hero-cover {
@@ -96,5 +104,19 @@ onMounted(fetchRuntime);
     display: grid;
     gap: 1rem;
     align-content: start;
+    justify-items: start;
+    text-align: left;
+}
+
+.album-page__artists-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+@media (max-width: 900px) {
+    .album-page__hero-card {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

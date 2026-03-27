@@ -222,7 +222,10 @@ onMounted(fetchRuntime);
 
 <style scoped>
 .track-page__hero-card {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     align-items: flex-start;
+    gap: 1.5rem;
 }
 
 .track-page__hero-cover {
@@ -234,7 +237,9 @@ onMounted(fetchRuntime);
     gap: 1rem;
     align-content: start;
     justify-items: start;
+    justify-content: start;
     text-align: left;
+    max-width: 100%;
 }
 
 .track-page__description-row,
@@ -304,6 +309,12 @@ onMounted(fetchRuntime);
 .track-page__artist-name a {
     color: inherit;
     text-decoration: none;
+}
+
+@media (max-width: 900px) {
+    .track-page__hero-card {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 720px) {

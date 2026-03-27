@@ -13,11 +13,11 @@ class AlbumController extends Controller
 {
     public function show(Album $album): Response
     {
-        $album->load(['artist']);
+        $album->load(['artist', 'artists']);
         $album->loadCount('tracks');
 
         $tracks = $album->tracks()
-            ->with(['artist', 'artists', 'album'])
+            ->with(['artist', 'artists', 'album', 'album.artists'])
             ->orderByRaw('track_number IS NULL, track_number ASC')
             ->orderBy('id')
             ->paginate(20)

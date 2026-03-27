@@ -115,7 +115,10 @@ onMounted(fetchRuntime);
 
 <style scoped>
 .artist-page__hero-card {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
     align-items: flex-start;
+    gap: 1.5rem;
 }
 
 .artist-page__hero-cover {
@@ -126,11 +129,19 @@ onMounted(fetchRuntime);
     display: grid;
     gap: 1rem;
     align-content: start;
+    justify-items: start;
+    text-align: left;
 }
 
 .artist-page__socials {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
+}
+
+@media (max-width: 900px) {
+    .artist-page__hero-card {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

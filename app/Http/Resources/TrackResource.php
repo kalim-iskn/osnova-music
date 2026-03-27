@@ -67,6 +67,14 @@ class TrackResource extends JsonResource
                     'title' => $this->album->title,
                     'slug' => $this->album->slug,
                     'cover_image_url' => $this->album->cover_image_url,
+                    'artists' => $this->album->relationLoaded('artists')
+                        ? $this->album->artists->map(fn (Artist $artist) => [
+                            'id' => $artist->id,
+                            'name' => $artist->name,
+                            'slug' => $artist->slug,
+                            'image_url' => $artist->image_url,
+                        ])->values()->all()
+                        : [],
                 ]
                 : null,
         ];

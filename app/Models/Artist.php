@@ -38,6 +38,11 @@ class Artist extends Model
         return $this->belongsToMany(Track::class, 'artist_track')->withTimestamps();
     }
 
+    public function creditedAlbums(): BelongsToMany
+    {
+        return $this->belongsToMany(Album::class, 'album_artist')->withTimestamps();
+    }
+
     public function getRouteKeyName(): string
     {
         return 'slug';

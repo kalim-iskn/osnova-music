@@ -26,6 +26,16 @@ class AlbumResource extends JsonResource
                 'name' => $this->artist->name,
                 'slug' => $this->artist->slug,
             ]),
+            'artists' => $this->whenLoaded('artists', fn () => $this->artists
+                ->map(fn ($artist) => [
+                    'id' => $artist->id,
+                    'name' => $artist->name,
+                    'slug' => $artist->slug,
+                    'image_url' => $artist->image_url,
+                    'genius_id' => $artist->genius_id,
+                ])
+                ->values()
+                ->all()),
             'tracks_count' => (int) ($this->tracks_count ?? 0),
         ];
     }

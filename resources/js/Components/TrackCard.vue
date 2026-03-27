@@ -57,7 +57,7 @@ const addToQueue = () => {
                 </div>
 
                 <p v-if="track.album" class="track-card__album">
-                    <Link :href="`/albums/${track.album.slug}`">
+                    <Link :href="`/albums/${track.album.slug}`" @click.stop>
                         {{ track.album.title }}
                     </Link>
                 </p>
@@ -65,7 +65,7 @@ const addToQueue = () => {
 
             <div class="track-card__footer">
                 <div class="track-card__controls">
-                    <button class="ghost-button ghost-button--small" type="button" @click="addToQueue">
+                    <button class="ghost-button ghost-button--small" type="button" @click.stop="addToQueue">
                         В очередь
                     </button>
                     <TrackInfoMenu :track="track" align="left" />
@@ -143,9 +143,9 @@ const addToQueue = () => {
 }
 
 .track-card__footer {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    justify-content: space-between;
     gap: 0.75rem;
     margin-top: 0.9rem;
     min-width: 0;
@@ -179,12 +179,12 @@ const addToQueue = () => {
     }
 
     .track-card__footer {
-        align-items: flex-start;
-        flex-direction: column;
+        grid-template-columns: 1fr;
+        align-items: start;
     }
 
     .track-card__duration {
-        align-self: flex-end;
+        justify-self: end;
     }
 }
 </style>

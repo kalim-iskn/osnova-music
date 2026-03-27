@@ -66,7 +66,7 @@ const addToQueue = () => {
 
                 <template v-if="showAlbum && track.album">
                     <span v-if="showArtist" class="track-row__separator">•</span>
-                    <Link :href="`/albums/${track.album.slug}`">
+                    <Link :href="`/albums/${track.album.slug}`" @click.stop>
                         {{ track.album.title }}
                     </Link>
                 </template>
@@ -76,7 +76,7 @@ const addToQueue = () => {
 
         <div class="track-row__actions">
             <div class="track-row__buttons">
-                <button class="ghost-button ghost-button--small track-row__queue-button" type="button" @click="addToQueue">
+                <button class="ghost-button ghost-button--small track-row__queue-button" type="button" @click.stop="addToQueue">
                     В очередь
                 </button>
                 <TrackInfoMenu :track="track" />
@@ -189,13 +189,17 @@ const addToQueue = () => {
 
     .track-row__actions {
         grid-column: 2;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.75rem;
         width: 100%;
         margin-top: 0.75rem;
     }
 
     .track-row__buttons {
-        max-width: calc(100% - 3.5rem);
+        min-width: 0;
+        flex-wrap: wrap;
     }
 }
 </style>
