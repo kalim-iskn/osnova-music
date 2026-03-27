@@ -63,7 +63,7 @@ class TrackGeniusController extends Controller
             return response()->json([
                 'song' => [
                     'id' => (int) ($song['id'] ?? 0),
-                    'title' => GeniusNameMatcher::storageValue((string) ($song['title'] ?? $track->title)),
+                    'title' => GeniusNameMatcher::normalizeStoredTrackTitle((string) ($song['title'] ?? $track->title)),
                     'description_preview' => $song['description_preview'] ?? null,
                     'language' => GeniusNameMatcher::resolveLanguageCode((array) ($song['tags'] ?? []), $song['language'] ?? null),
                     'genres' => GeniusNameMatcher::extractGenres((array) ($song['tags'] ?? [])),

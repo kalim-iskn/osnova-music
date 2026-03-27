@@ -181,6 +181,32 @@ class GeniusNameMatcher
         return $value !== '' ? $value : null;
     }
 
+    public static function normalizeStoredTrackTitle(string $value): string
+    {
+        $title = self::storageValue($value);
+
+        if ($title === '') {
+            return '';
+        }
+
+        while (preg_match('/^(?P<base>.+?)\s*[\(\[\{](?P<meta>[^()\[\]{}]+)[\)\]\}]\s*$/u', $title, $matches) === 1) {
+            $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
+            $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
+
+            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)) {
+                break;
+            }
+
+            if (! self::looksLikeTranslationSuffix($base, $meta)) {
+                break;
+            }
+
+            $title = $base;
+        }
+
+        return $title;
+    }
+
     /**
      * @param  string[]  $candidates
      */
@@ -545,6 +571,52 @@ class GeniusNameMatcher
             'â€™' => "'",
             'â€œ' => '"',
             'â€' => '"',
+            'Ã¡' => 'á',
+            'Ã¢' => 'â',
+            'Ã¤' => 'ä',
+            'Ã¦' => 'æ',
+            'Ã§' => 'ç',
+            'Ã¨' => 'è',
+            'Ã©' => 'é',
+            'Ãª' => 'ê',
+            'Ã«' => 'ë',
+            'Ã¬' => 'ì',
+            'Ã­' => 'í',
+            'Ã®' => 'î',
+            'Ã¯' => 'ï',
+            'Ã±' => 'ñ',
+            'Ã²' => 'ò',
+            'Ã³' => 'ó',
+            'Ã´' => 'ô',
+            'Ã¶' => 'ö',
+            'Ã¹' => 'ù',
+            'Ãº' => 'ú',
+            'Ã»' => 'û',
+            'Ã¼' => 'ü',
+            'Ã¿' => 'ÿ',
+            'Г¡' => 'á',
+            'Г¢' => 'â',
+            'Г¤' => 'ä',
+            'Г¦' => 'æ',
+            'Г§' => 'ç',
+            'ГЁ' => 'è',
+            'Г©' => 'é',
+            'ГЄ' => 'ê',
+            'Г«' => 'ë',
+            'Г¬' => 'ì',
+            'Г­' => 'í',
+            'Г®' => 'î',
+            'ГЇ' => 'ï',
+            'Г±' => 'ñ',
+            'ГІ' => 'ò',
+            'Гі' => 'ó',
+            'Гґ' => 'ô',
+            'Г¶' => 'ö',
+            'Г№' => 'ù',
+            'Гє' => 'ú',
+            'Г»' => 'û',
+            'Гј' => 'ü',
+            'Гї' => 'ÿ',
             'Â ' => ' ',
             'Â«' => '«',
             'Â»' => '»',
@@ -589,6 +661,45 @@ class GeniusNameMatcher
         }
 
         return rtrim(mb_substr($value, 0, (int) $firstMatch[1]));
+    }
+
+    private static function looksLikeTranslationSuffix(string $base, string $meta): bool
+    {
+        $normalizedMeta = self::normalizeLoose($meta);
+
+        if ($normalizedMeta === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(?:translation|translated|english version|english translation|romanized|romanization)\b/iu', $normalizedMeta) === 1) {
+            return true;
+        }
+
+        $baseHasCyrillic = preg_match('/\p{Cyrillic}/u', $base) === 1;
+        $metaHasCyrillic = preg_match('/\p{Cyrillic}/u', $meta) === 1;
+        $metaHasLatin = preg_match('/\p{Latin}/u', $meta) === 1;
+        $metaHasLetters = preg_match('/\p{L}/u', $meta) === 1;
+
+        if ($baseHasCyrillic && ! $metaHasCyrillic && $metaHasLatin) {
+            return true;
+        }
+
+        if (! $baseHasCyrillic && $metaHasCyrillic && preg_match('/\p{Latin}/u', $base) === 1) {
+            return true;
+        }
+
+        return ! $metaHasCyrillic && $metaHasLetters && preg_match("/^[\\p{Latin}\\d\\s\\-'\"“”„`&.,:;!?+]+$/u", $meta) === 1;
+    }
+
+    private static function isVersionDescriptor(string $value): bool
+    {
+        $normalized = self::normalizeLoose($value);
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|prod|cover)\b/iu', $normalized) === 1;
     }
 
     private static function looksLikeMojibake(string $value): bool
