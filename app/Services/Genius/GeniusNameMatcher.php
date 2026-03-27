@@ -143,30 +143,20 @@ class GeniusNameMatcher
     public static function storageValue(string $value): string
     {
         $value = self::repairMojibake(self::forceUtf8($value));
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
         $value = self::cleanWhitespace($value);
 
         if ($value === '') {
             return '';
         }
 
-        $value = preg_replace_callback('/\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]/u', function (array $matches): string {
-            $inner = self::cleanWhitespace((string) ($matches[1] ?? ''));
-
-            if ($inner === '') {
-                return '';
-            }
-
-            if (preg_match('/[\p{Cyrillic}\d]/u', $inner) === 1) {
-                return ' (' . $inner . ')';
-            }
-
-            if (preg_match('/^[\p{Latin}\s\-\'"`.,&:!?\/#+]+$/u', $inner) === 1) {
-                return '';
-            }
-
-            return ' (' . $inner . ')';
-        }, $value) ?? $value;
-
+        $value = strtr($value, [
+            '[' => '(',
+            ']' => ')',
+            '{' => '(',
+            '}' => ')',
+        ]);
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
 
         return trim($value, " \t\n\r\0\x0B-–—");
@@ -414,12 +404,28 @@ class GeniusNameMatcher
             return '';
         }
 
+        $value = self::normalizeCommonBrokenSymbols($value);
+
         if (! self::looksLikeMojibake($value)) {
             return $value;
         }
 
         $best = $value;
         $bestScore = self::readabilityScore($value);
+        $candidates = [$value];
+
+        foreach (['Windows-1251', 'CP1251', 'Windows-1252', 'ISO-8859-1'] as $encoding) {
+            $step = @iconv('UTF-8', $encoding . '//IGNORE', $value);
+
+            if (is_string($step) && $step !== '') {
+                $fixed = @iconv($encoding, 'UTF-8//IGNORE', $step);
+
+                if (is_string($fixed) && $fixed !== '') {
+                    $candidates[] = $fixed;
+                }
+            }
+        }
+
         $current = $value;
 
         for ($attempt = 0; $attempt < 2; $attempt++) {
@@ -435,23 +441,23 @@ class GeniusNameMatcher
                 break;
             }
 
-            $fixed = html_entity_decode($fixed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $fixed = str_replace(['“', '”', '„', '’', '`'], '"', $fixed);
-            $fixed = str_replace(['–', '—'], '-', $fixed);
-            $fixed = preg_replace('/\s+/u', ' ', $fixed) ?? $fixed;
-            $fixed = trim($fixed);
-            $score = self::readabilityScore($fixed);
+            $candidates[] = $fixed;
+            $current = $fixed;
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidate = self::normalizeCommonBrokenSymbols((string) $candidate);
+            $candidate = html_entity_decode($candidate, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $candidate = str_replace(['“', '”', '„', '’', '`'], '"', $candidate);
+            $candidate = str_replace(['–', '—'], '-', $candidate);
+            $candidate = preg_replace('/\s+/u', ' ', $candidate) ?? $candidate;
+            $candidate = trim($candidate);
+            $score = self::readabilityScore($candidate);
 
             if ($score > $bestScore) {
-                $best = $fixed;
+                $best = $candidate;
                 $bestScore = $score;
             }
-
-            if (! self::looksLikeMojibake($fixed)) {
-                break;
-            }
-
-            $current = $fixed;
         }
 
         return self::looksReadable($best) ? $best : $value;
@@ -517,13 +523,34 @@ class GeniusNameMatcher
         $value = self::forceUtf8($value);
         $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $value = self::forceUtf8($value);
+        $value = self::normalizeCommonBrokenSymbols($value);
         $value = str_replace(['“', '”', '„', '’', '`'], '"', $value);
         $value = str_replace(['–', '—'], '-', $value);
+        $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
+        $value = preg_replace('/[[:cntrl:]]+/u', ' ', $value) ?? $value;
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
 
         return trim($value);
     }
 
+
+    private static function normalizeCommonBrokenSymbols(string $value): string
+    {
+        return strtr($value, [
+            'âˆš' => '√',
+            '€љ' => '√',
+            'â€“' => '-',
+            'â€”' => '-',
+            'â€˜' => "'",
+            'â€™' => "'",
+            'â€œ' => '"',
+            'â€' => '"',
+            'Â ' => ' ',
+            'Â«' => '«',
+            'Â»' => '»',
+            'Â°' => '°',
+        ]);
+    }
 
     private static function trimSocialTail(string $value): string
     {
@@ -566,7 +593,7 @@ class GeniusNameMatcher
 
     private static function looksLikeMojibake(string $value): bool
     {
-        return preg_match('/(?:Р[А-Яа-яЁёA-Za-z]|С[А-Яа-яЁёA-Za-z]|Ð.|Ñ.){2,}/u', $value) === 1;
+        return preg_match('/(?:Р[А-Яа-яЁёA-Za-z]|С[А-Яа-яЁёA-Za-z]|Ð.|Ñ.|Ã.|Â.|â.|€.){2,}/u', $value) === 1;
     }
 
     private static function readabilityScore(string $value): float

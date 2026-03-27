@@ -2,6 +2,7 @@
 
 namespace App\Services\TrackParsing;
 
+use App\Services\Genius\GeniusNameMatcher;
 use App\Services\TrackParsing\DTO\ParsedArtistPage;
 use App\Services\TrackParsing\DTO\ParsedTrack;
 use Illuminate\Http\Client\Response;
@@ -490,14 +491,16 @@ class MuzofondTrackParser
     private function extractTrackMetadata(string $rawTrackTitle, array $genresFromDescription): array
     {
         $title = $this->normalizeText($rawTrackTitle);
-        $title = preg_replace('/(новинки|new|новое)/iu', '', $title) ?? $title;
+        $title = preg_replace('/\b(новинки|new|новое)\b/iu', '', $title) ?? $title;
         $title = $this->normalizeText($title);
         $album = null;
         $year = null;
 
-        if (preg_match('/^(?P<title>.*)\((?P<meta>[^()]*)\)\s*$/u', $title, $matches) === 1) {
-            $baseTitle = $this->normalizeText($matches['title']);
-            $meta = $this->normalizeText($matches['meta']);
+        $metadata = $this->splitTrailingMetadataBlock($title);
+
+        if (is_array($metadata)) {
+            $baseTitle = $this->normalizeText((string) ($metadata['title'] ?? ''));
+            $meta = $this->normalizeText((string) ($metadata['meta'] ?? ''));
 
             if ($baseTitle !== '' && $meta !== '') {
                 $parsed = $this->parseMetaBlock($meta, $genresFromDescription);
@@ -515,6 +518,55 @@ class MuzofondTrackParser
             'album' => $album,
             'year' => $year,
         ];
+    }
+
+    /**
+     * @return array{title:string, meta:string}|null
+     */
+    private function splitTrailingMetadataBlock(string $title): ?array
+    {
+        $title = $this->normalizeText($title);
+
+        if ($title === '' || ! str_ends_with($title, ')')) {
+            return null;
+        }
+
+        $length = mb_strlen($title);
+        $depth = 0;
+
+        for ($position = $length - 1; $position >= 0; $position--) {
+            $char = mb_substr($title, $position, 1);
+
+            if ($char === ')') {
+                $depth++;
+
+                continue;
+            }
+
+            if ($char !== '(') {
+                continue;
+            }
+
+            $depth--;
+
+            if ($depth !== 0) {
+                continue;
+            }
+
+            $baseTitle = $this->normalizeText(mb_substr($title, 0, $position));
+            $meta = $this->normalizeText(mb_substr($title, $position + 1, $length - $position - 2));
+
+            if ($baseTitle === '' || $meta === '') {
+                return null;
+            }
+
+            return [
+                'title' => $baseTitle,
+                'meta' => $meta,
+            ];
+        }
+
+        return null;
     }
 
     /**
@@ -623,55 +675,17 @@ class MuzofondTrackParser
 
     private function normalizeText(string $value): string
     {
-        $value = $this->forceUtf8($value);
-        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = GeniusNameMatcher::storageValue($value);
         $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
         $value = preg_replace('/[[:cntrl:]]+/u', ' ', $value) ?? $value;
         $value = trim((string) preg_replace('/\s+/u', ' ', $value));
 
-        return $this->repairMojibake(trim($value));
+        return trim($value);
     }
 
     private function forceUtf8(string $value): string
     {
-        if ($value === '') {
-            return '';
-        }
-
-        if (mb_check_encoding($value, 'UTF-8')) {
-            return $value;
-        }
-
-        foreach (['Windows-1251', 'CP1251', 'ISO-8859-1'] as $encoding) {
-            $converted = @mb_convert_encoding($value, 'UTF-8', $encoding);
-
-            if (is_string($converted) && $converted !== '' && mb_check_encoding($converted, 'UTF-8')) {
-                return $converted;
-            }
-        }
-
-        $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
-
-        return is_string($clean) ? $clean : $value;
-    }
-
-    private function repairMojibake(string $value): string
-    {
-        if ($value === '') {
-            return '';
-        }
-
-        if (preg_match('/(?:Р.|С.){2,}/u', $value) !== 1) {
-            return $value;
-        }
-
-        $decoded = @iconv('Windows-1251', 'UTF-8//IGNORE', $value);
-
-        if (is_string($decoded) && $decoded !== '' && preg_match('/\p{Cyrillic}/u', $decoded) === 1) {
-            return trim($decoded);
-        }
-
-        return $value;
+        return GeniusNameMatcher::forceUtf8($value);
     }
 
     /**
