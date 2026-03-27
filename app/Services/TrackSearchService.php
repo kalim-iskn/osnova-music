@@ -13,7 +13,7 @@ class TrackSearchService
     public function searchTracks(?string $term, int $limit = 24): Collection
     {
         return $this->baseTrackQuery($term)
-            ->latest('tracks.id')
+            ->popular()
             ->limit($limit)
             ->get();
     }
@@ -21,7 +21,7 @@ class TrackSearchService
     public function searchTracksPaginated(?string $term, int $perPage = 20): LengthAwarePaginator
     {
         return $this->baseTrackQuery($term)
-            ->latest('tracks.id')
+            ->popular()
             ->paginate($perPage)
             ->withQueryString();
     }
@@ -66,12 +66,15 @@ class TrackSearchService
         $term = trim((string) $term);
 
         return Track::query()
-            ->with(['artist', 'album'])
+            ->with(['artist', 'artists', 'album', 'album.artists'])
             ->when($term !== '', function ($query) use ($term) {
                 $query->where(function ($subQuery) use ($term) {
                     $subQuery
                         ->where('tracks.title', 'ILIKE', "%{$term}%")
                         ->orWhereHas('artist', fn ($artistQuery) => $artistQuery
+                            ->where('name', 'ILIKE', "%{$term}%")
+                            ->orWhere('slug', 'ILIKE', "%{$term}%"))
+                        ->orWhereHas('artists', fn ($artistQuery) => $artistQuery
                             ->where('name', 'ILIKE', "%{$term}%")
                             ->orWhere('slug', 'ILIKE', "%{$term}%"))
                         ->orWhereHas('album', fn ($albumQuery) => $albumQuery

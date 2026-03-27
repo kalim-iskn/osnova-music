@@ -62,7 +62,7 @@ class GeniusNameMatcher
         }
 
         if (is_string($value)) {
-            return self::forceUtf8($value);
+            return self::repairMojibake(self::forceUtf8($value));
         }
 
         return $value;
@@ -136,7 +136,7 @@ class GeniusNameMatcher
 
     public static function storageValue(string $value): string
     {
-        $value = self::forceUtf8($value);
+        $value = self::repairMojibake(self::forceUtf8($value));
         $value = self::cleanWhitespace($value);
 
         if ($value === '') {
@@ -213,7 +213,7 @@ class GeniusNameMatcher
         $value = self::storageValue($value);
         $value = preg_replace('/\b(snippet|romanized|romanization|translation|translated|lyrics)\b/iu', '', $value) ?? $value;
         $value = preg_replace('/\s*[\(\[\{].*?[\)\]\}]/u', '', $value) ?? $value;
-        $value = self::cleanWhitespace($value);
+        $value = self::repairMojibake(self::cleanWhitespace($value));
         $value = Str::lower($value);
         $value = str_replace(['ё'], ['е'], $value);
         $value = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $value) ?? $value;
@@ -286,6 +286,12 @@ class GeniusNameMatcher
             if ($transliterated !== '') {
                 $variants[] = $transliterated;
             }
+
+            $reverseTransliterated = self::transliterateLatinToCyrillic($variant);
+
+            if ($reverseTransliterated !== '') {
+                $variants[] = $reverseTransliterated;
+            }
         }
 
         return collect($variants)
@@ -319,6 +325,87 @@ class GeniusNameMatcher
         $normalized = preg_replace('/\s{2,}/u', ' ', $normalized) ?? $normalized;
 
         return trim($normalized);
+    }
+
+    private static function transliterateLatinToCyrillic(string $value): string
+    {
+        $value = self::cleanWhitespace($value);
+
+        if ($value === '' || preg_match('/\p{Cyrillic}/u', $value) === 1) {
+            return '';
+        }
+
+        $normalized = Str::lower(Str::ascii($value));
+        $normalized = preg_replace('/[^a-z0-9\s-]+/u', ' ', $normalized) ?? $normalized;
+        $normalized = preg_replace('/\s{2,}/u', ' ', $normalized) ?? $normalized;
+
+        $map = [
+            'sch' => 'щ',
+            'sh' => 'ш',
+            'ch' => 'ч',
+            'ts' => 'ц',
+            'zh' => 'ж',
+            'yu' => 'ю',
+            'ya' => 'я',
+            'yo' => 'ё',
+            'ye' => 'е',
+            'kh' => 'х',
+            'a' => 'а',
+            'b' => 'б',
+            'c' => 'к',
+            'd' => 'д',
+            'e' => 'е',
+            'f' => 'ф',
+            'g' => 'г',
+            'h' => 'х',
+            'i' => 'и',
+            'j' => 'дж',
+            'k' => 'к',
+            'l' => 'л',
+            'm' => 'м',
+            'n' => 'н',
+            'o' => 'о',
+            'p' => 'п',
+            'q' => 'к',
+            'r' => 'р',
+            's' => 'с',
+            't' => 'т',
+            'u' => 'у',
+            'v' => 'в',
+            'w' => 'в',
+            'x' => 'кс',
+            'y' => 'й',
+            'z' => 'з',
+        ];
+
+        uksort($map, fn (string $left, string $right) => strlen($right) <=> strlen($left));
+
+        return trim(strtr($normalized, $map));
+    }
+
+    private static function repairMojibake(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (preg_match('/(?:Р.|С.|Ð.|Ñ.){2,}/u', $value) !== 1) {
+            return $value;
+        }
+
+        $step = @iconv('UTF-8', 'Windows-1251//IGNORE', $value);
+
+        if (! is_string($step) || $step === '') {
+            return $value;
+        }
+
+        $fixed = @iconv('Windows-1251', 'UTF-8//IGNORE', $step);
+
+        if (! is_string($fixed) || $fixed === '') {
+            return $value;
+        }
+
+        return self::looksReadable($fixed) ? $fixed : $value;
     }
 
     private static function artistVariants(string $value): array
