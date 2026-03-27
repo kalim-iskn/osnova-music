@@ -15,13 +15,17 @@ class GeniusNameMatcher
         }
 
         if (mb_check_encoding($value, 'UTF-8')) {
-            return $value;
+            $value = self::stripInvalidUtf8Sequences($value) ?: $value;
+
+            return self::repairMojibake($value);
         }
 
         foreach (['Windows-1251', 'CP1251', 'ISO-8859-1'] as $encoding) {
             $converted = @iconv($encoding, 'UTF-8//IGNORE', $value);
 
             if (is_string($converted) && $converted !== '' && mb_check_encoding($converted, 'UTF-8')) {
+                $converted = self::repairMojibake($converted);
+
                 if (self::looksReadable($converted)) {
                     return $converted;
                 }
@@ -30,6 +34,8 @@ class GeniusNameMatcher
             $converted = @mb_convert_encoding($value, 'UTF-8', $encoding);
 
             if (is_string($converted) && $converted !== '' && mb_check_encoding($converted, 'UTF-8')) {
+                $converted = self::repairMojibake($converted);
+
                 if (self::looksReadable($converted)) {
                     return $converted;
                 }
@@ -39,13 +45,13 @@ class GeniusNameMatcher
         $cleaned = self::stripInvalidUtf8Sequences($value);
 
         if ($cleaned !== '') {
-            return $cleaned;
+            return self::repairMojibake($cleaned);
         }
 
         $cleaned = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
 
         if (is_string($cleaned) && $cleaned !== '' && mb_check_encoding($cleaned, 'UTF-8')) {
-            return $cleaned;
+            return self::repairMojibake($cleaned);
         }
 
         return '';
@@ -164,6 +170,25 @@ class GeniusNameMatcher
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
 
         return trim($value, " \t\n\r\0\x0B-–—");
+    }
+
+    public static function cleanDescriptionPreview(?string $value): ?string
+    {
+        $value = self::repairMojibake(self::forceUtf8((string) ($value ?? '')));
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = strip_tags($value);
+        $value = self::cleanWhitespace($value);
+
+        if ($value === '') {
+            return null;
+        }
+
+        $value = preg_replace('/\b(?:Read More|More on Genius|Подробнее)\b.*$/iu', '', $value) ?? $value;
+        $value = self::trimSocialTail($value);
+        $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
+        $value = trim($value, " \t\n\r\0\x0B-–—,.!?:;");
+
+        return $value !== '' ? $value : null;
     }
 
     /**
@@ -389,23 +414,47 @@ class GeniusNameMatcher
             return '';
         }
 
-        if (preg_match('/(?:Р.|С.|Ð.|Ñ.){2,}/u', $value) !== 1) {
+        if (! self::looksLikeMojibake($value)) {
             return $value;
         }
 
-        $step = @iconv('UTF-8', 'Windows-1251//IGNORE', $value);
+        $best = $value;
+        $bestScore = self::readabilityScore($value);
+        $current = $value;
 
-        if (! is_string($step) || $step === '') {
-            return $value;
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            $step = @iconv('UTF-8', 'Windows-1251//IGNORE', $current);
+
+            if (! is_string($step) || $step === '') {
+                break;
+            }
+
+            $fixed = @iconv('Windows-1251', 'UTF-8//IGNORE', $step);
+
+            if (! is_string($fixed) || $fixed === '') {
+                break;
+            }
+
+            $fixed = html_entity_decode($fixed, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $fixed = str_replace(['“', '”', '„', '’', '`'], '"', $fixed);
+            $fixed = str_replace(['–', '—'], '-', $fixed);
+            $fixed = preg_replace('/\s+/u', ' ', $fixed) ?? $fixed;
+            $fixed = trim($fixed);
+            $score = self::readabilityScore($fixed);
+
+            if ($score > $bestScore) {
+                $best = $fixed;
+                $bestScore = $score;
+            }
+
+            if (! self::looksLikeMojibake($fixed)) {
+                break;
+            }
+
+            $current = $fixed;
         }
 
-        $fixed = @iconv('Windows-1251', 'UTF-8//IGNORE', $step);
-
-        if (! is_string($fixed) || $fixed === '') {
-            return $value;
-        }
-
-        return self::looksReadable($fixed) ? $fixed : $value;
+        return self::looksReadable($best) ? $best : $value;
     }
 
     private static function artistVariants(string $value): array
@@ -473,6 +522,68 @@ class GeniusNameMatcher
         $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
 
         return trim($value);
+    }
+
+
+    private static function trimSocialTail(string $value): string
+    {
+        $tokens = [
+            'Дискография',
+            'Сообщество ВКонтакте',
+            'Страница ВКонтакте',
+            'ВКонтакте',
+            'Телеграм-канал',
+            'Telegram-канал',
+            'YouTube',
+            'SoundCloud',
+            'TikTok',
+            'Instagram',
+            'Twitter',
+            'Facebook',
+            'Spotify',
+            'Apple Music',
+            'Official Website',
+            'Официальный сайт',
+        ];
+
+        $pattern = '/(?:' . implode('|', array_map(fn (string $token) => preg_quote($token, '/'), $tokens)) . ')/iu';
+        preg_match_all($pattern, $value, $matches, PREG_OFFSET_CAPTURE);
+
+        $tokenMatches = $matches[0] ?? [];
+
+        if (count($tokenMatches) < 2) {
+            return $value;
+        }
+
+        $firstMatch = $tokenMatches[0] ?? null;
+
+        if (! is_array($firstMatch) || ! isset($firstMatch[1])) {
+            return $value;
+        }
+
+        return rtrim(mb_substr($value, 0, (int) $firstMatch[1]));
+    }
+
+    private static function looksLikeMojibake(string $value): bool
+    {
+        return preg_match('/(?:Р[А-Яа-яЁёA-Za-z]|С[А-Яа-яЁёA-Za-z]|Ð.|Ñ.){2,}/u', $value) === 1;
+    }
+
+    private static function readabilityScore(string $value): float
+    {
+        if ($value === '') {
+            return 0.0;
+        }
+
+        $letters = preg_match_all('/[\p{L}]/u', $value);
+        $readable = preg_match_all('/[\p{Latin}\p{Cyrillic}\d\s\-\'"`.,&:!?\/#+()\[\]{}]/u', $value);
+        $cyrillic = preg_match_all('/\p{Cyrillic}/u', $value);
+
+        if (! is_int($letters) || $letters === 0) {
+            return 0.0;
+        }
+
+        return ((is_int($readable) ? $readable : 0) / $letters) + ((is_int($cyrillic) ? $cyrillic : 0) / max(1, $letters));
     }
 
     private static function looksReadable(string $value): bool

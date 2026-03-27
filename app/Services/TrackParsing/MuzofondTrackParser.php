@@ -348,6 +348,7 @@ class MuzofondTrackParser
                 durationSeconds: $durationSeconds,
                 audioUrl: $this->absoluteUrl($audioUrl),
                 albumTitle: $meta['album'],
+                trackNumber: count($tracks) + 1,
                 artistNames: $artistNames,
                 releaseYear: $meta['year'],
                 genres: $genres,

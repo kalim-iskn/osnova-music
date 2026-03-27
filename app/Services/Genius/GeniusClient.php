@@ -93,6 +93,29 @@ class GeniusClient
     }
 
     /**
+     * @return array<int, int>
+     */
+    public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+    {
+        return Cache::remember('album-track-numbers:' . $albumId, $this->cacheTtl, function () use ($albumId, $albumUrl): array {
+            $albumPayload = $albumUrl ? null : $this->album($albumId);
+            $albumUrl ??= is_array($albumPayload) ? (string) ($albumPayload['url'] ?? '') : '';
+
+            if ($albumUrl === '') {
+                return [];
+            }
+
+            $html = $this->requestHtml($albumUrl);
+
+            if ($html === null || trim($html) === '') {
+                return [];
+            }
+
+            return $this->extractTrackNumbersFromAlbumHtml($html);
+        });
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function allArtistSongs(int $artistId): array
@@ -202,18 +225,79 @@ class GeniusClient
         });
     }
 
+    private function requestHtml(string $url): ?string
+    {
+        $response = Http::timeout($this->timeout)
+            ->retry(2, 700, throw: false)
+            ->withHeaders([
+                'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language' => 'ru,en;q=0.9',
+                'Cache-Control' => 'no-cache',
+                'Pragma' => 'no-cache',
+                'Upgrade-Insecure-Requests' => '1',
+            ])
+            ->get($url);
 
-    private function sanitizePayload(mixed $value): mixed
+        if (! $response->successful()) {
+            return null;
+        }
+
+        return GeniusNameMatcher::forceUtf8((string) $response->body());
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function extractTrackNumbersFromAlbumHtml(string $html): array
+    {
+        $html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $map = [];
+
+        $patterns = [
+            '/"number"\s*:\s*"?(?<number>\d+)"?.{0,1800}?"song"\s*:\s*\{.{0,1800}?"id"\s*:\s*(?<id>\d+)/su',
+            '/"song"\s*:\s*\{.{0,1800}?"id"\s*:\s*(?<id>\d+).{0,1800}?"number"\s*:\s*"?(?<number>\d+)"/su',
+            '/"song_id"\s*:\s*(?<id>\d+).{0,600}?"(?:track_)?number"\s*:\s*"?(?<number>\d+)"/su',
+            '/"id"\s*:\s*(?<id>\d+).{0,600}?"track_number"\s*:\s*"?(?<number>\d+)"/su',
+        ];
+
+        foreach ($patterns as $pattern) {
+            preg_match_all($pattern, $html, $matches, PREG_SET_ORDER);
+
+            foreach ($matches as $match) {
+                $songId = (int) ($match['id'] ?? 0);
+                $trackNumber = (int) ($match['number'] ?? 0);
+
+                if ($songId <= 0 || $trackNumber <= 0 || isset($map[$songId])) {
+                    continue;
+                }
+
+                $map[$songId] = $trackNumber;
+            }
+
+            if ($map !== []) {
+                return $map;
+            }
+        }
+
+        return $map;
+    }
+
+    private function sanitizePayload(mixed $value, ?string $key = null): mixed
     {
         if (is_array($value)) {
-            foreach ($value as $key => $item) {
-                $value[$key] = $this->sanitizePayload($item);
+            foreach ($value as $itemKey => $item) {
+                $value[$itemKey] = $this->sanitizePayload($item, is_string($itemKey) ? $itemKey : null);
             }
 
             return $value;
         }
 
         if (is_string($value)) {
+            if ($key === 'description_preview') {
+                return GeniusNameMatcher::cleanDescriptionPreview($value);
+            }
+
             return GeniusNameMatcher::forceUtf8($value);
         }
 

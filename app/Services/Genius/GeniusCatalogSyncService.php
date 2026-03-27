@@ -45,16 +45,7 @@ class GeniusCatalogSyncService
         if (! $geniusArtist) {
             foreach ($page->tracks as $parsedTrack) {
                 $creditedArtists = $this->resolveFallbackCreditedArtists($page, $parsedTrack, $artist);
-                $albumId = null;
-
-                if ($this->shouldPersistAlbumTitle($parsedTrack->albumTitle)) {
-                    [$album, $albumCreated] = $this->upsertAlbumFallback($artist, $parsedTrack->albumTitle);
-
-                    $albumId = $album->id;
-                    $albumsCreated += $albumCreated ? 1 : 0;
-                }
-
-                [$track, $trackCreated] = $this->upsertTrackFallback($artist, $albumId, $parsedTrack);
+                [$track, $trackCreated] = $this->upsertTrackFallback($artist, null, $parsedTrack);
                 $tracksCreated += $trackCreated ? 1 : 0;
                 $track->artists()->syncWithoutDetaching(collect($creditedArtists)->pluck('id')->unique()->values()->all());
             }
@@ -93,15 +84,7 @@ class GeniusCatalogSyncService
 
                     if (! $matchedSummary) {
                         $creditedArtists = $this->resolveFallbackCreditedArtists($page, $parsedTrack, $artist);
-                        $albumId = null;
-
-                        if ($this->shouldPersistAlbumTitle($parsedTrack->albumTitle)) {
-                            [$album, $albumCreated] = $this->upsertAlbumFallback($artist, $parsedTrack->albumTitle);
-                            $albumId = $album->id;
-                            $albumsCreated += $albumCreated ? 1 : 0;
-                        }
-
-                        [$track, $trackCreated] = $this->upsertTrackFallback($artist, $albumId, $parsedTrack);
+                        [$track, $trackCreated] = $this->upsertTrackFallback($artist, null, $parsedTrack);
                         $track->artists()->syncWithoutDetaching(collect($creditedArtists)->pluck('id')->unique()->values()->all());
 
                         return ['matched' => false, 'created' => $trackCreated];
@@ -111,15 +94,7 @@ class GeniusCatalogSyncService
 
                     if (! $songDetail || ! $this->songPrimaryArtistMatchesPage($songDetail, $page->artistName)) {
                         $creditedArtists = $this->resolveFallbackCreditedArtists($page, $parsedTrack, $artist);
-                        $albumId = null;
-
-                        if ($this->shouldPersistAlbumTitle($parsedTrack->albumTitle)) {
-                            [$album, $albumCreated] = $this->upsertAlbumFallback($artist, $parsedTrack->albumTitle);
-                            $albumId = $album->id;
-                            $albumsCreated += $albumCreated ? 1 : 0;
-                        }
-
-                        [$track, $trackCreated] = $this->upsertTrackFallback($artist, $albumId, $parsedTrack);
+                        [$track, $trackCreated] = $this->upsertTrackFallback($artist, null, $parsedTrack);
                         $track->artists()->syncWithoutDetaching(collect($creditedArtists)->pluck('id')->unique()->values()->all());
 
                         return ['matched' => false, 'created' => $trackCreated];
@@ -236,7 +211,7 @@ class GeniusCatalogSyncService
         $candidates = collect($searchQueries)
             ->flatMap(fn (string $query) => $this->geniusClient->searchArtist($query))
             ->unique(fn (array $candidate) => (int) ($candidate['id'] ?? 0))
-            ->take(8)
+            ->take(12)
             ->values();
 
         if ($candidates->isEmpty()) {
@@ -252,6 +227,8 @@ class GeniusCatalogSyncService
 
         $bestScore = 0.0;
         $bestArtist = null;
+        $bestExactAliasMatch = false;
+        $bestOverlap = 0;
 
         foreach ($candidates as $candidate) {
             $artist = $this->geniusClient->artist((int) $candidate['id']);
@@ -270,21 +247,43 @@ class GeniusCatalogSyncService
             $overlap = $this->calculateSongOverlap((int) $artist['id'], $sampleTrackTitles);
             $exactAliasMatch = collect($aliases)->contains(fn (string $alias) => GeniusNameMatcher::bestArtistScore($page->artistName, [$alias]) >= 0.985);
 
-            $score = $nameScore + ($exactAliasMatch ? 0.08 : 0.0);
+            $score = $nameScore + ($exactAliasMatch ? 0.14 : 0.0);
 
-            if ($overlap >= 2) {
-                $score += 0.1;
-            } elseif ($overlap === 0 && $nameScore < 0.9) {
-                $score -= 0.12;
+            if ($overlap >= 3) {
+                $score += 0.16;
+            } elseif ($overlap === 2) {
+                $score += 0.12;
+            } elseif ($overlap === 1) {
+                $score += 0.05;
+            } elseif ($nameScore < 0.9) {
+                $score -= 0.08;
             }
 
             if ($score > $bestScore) {
                 $bestScore = $score;
                 $bestArtist = $artist;
+                $bestExactAliasMatch = $exactAliasMatch;
+                $bestOverlap = $overlap;
             }
         }
 
-        return $bestScore >= 0.86 ? $bestArtist : null;
+        if (! $bestArtist) {
+            return null;
+        }
+
+        if ($bestScore >= 0.86) {
+            return $bestArtist;
+        }
+
+        if ($bestExactAliasMatch && $bestScore >= 0.76) {
+            return $bestArtist;
+        }
+
+        if ($bestOverlap >= 2 && $bestScore >= 0.78) {
+            return $bestArtist;
+        }
+
+        return null;
     }
 
     /**
@@ -409,7 +408,7 @@ class GeniusCatalogSyncService
         $artistPayload = GeniusNameMatcher::sanitizeForDatabase([
             'name' => $storedName,
             'image_url' => $this->geniusClient->artistImageUrl($payload),
-            'description_preview' => isset($payload['description_preview']) ? GeniusNameMatcher::forceUtf8((string) $payload['description_preview']) : null,
+            'description_preview' => GeniusNameMatcher::cleanDescriptionPreview($payload['description_preview'] ?? null),
             'genius_id' => (int) $payload['id'],
         ]);
 
@@ -465,12 +464,19 @@ class GeniusCatalogSyncService
             $albumArtists->push($albumArtist);
         }
 
-        if ($albumArtists->isEmpty()) {
+        if (! $albumArtists->contains(fn (Artist $artist) => $artist->id === $fallbackArtist->id)) {
             $albumArtists->push($fallbackArtist);
         }
 
+        $albumArtists = new EloquentCollection(
+            $albumArtists
+                ->unique(fn (Artist $artist) => $artist->id)
+                ->values()
+                ->all()
+        );
+
         /** @var Artist $primaryAlbumArtist */
-        $primaryAlbumArtist = $albumArtists->first() ?? $fallbackArtist;
+        $primaryAlbumArtist = $this->resolvePreferredAlbumArtist($fallbackArtist, $albumArtists);
 
         if (! $album) {
             $created = true;
@@ -511,33 +517,55 @@ class GeniusCatalogSyncService
      */
     private function upsertTrackFromGenius(Artist $fallbackArtist, ParsedTrack $parsedTrack, array $songPayload): array
     {
-        $performerPayloads = collect(array_merge(
-            (array) ($songPayload['primary_artists'] ?? []),
-            (array) ($songPayload['featured_artists'] ?? []),
-        ))
+        $primaryPerformerPayloads = collect((array) ($songPayload['primary_artists'] ?? []))
             ->filter(fn ($artist) => is_array($artist) && isset($artist['id']))
-            ->unique(fn ($artist) => (int) $artist['id'])
             ->values();
 
-        $performers = new EloquentCollection();
-
-        foreach ($performerPayloads as $index => $artistPayload) {
-            [$artist] = $this->upsertArtistFromGenius($index === 0 ? $fallbackArtist : null, $artistPayload);
-            $performers->push($artist);
+        if ($primaryPerformerPayloads->isEmpty() && is_array($songPayload['primary_artist'] ?? null) && isset($songPayload['primary_artist']['id'])) {
+            $primaryPerformerPayloads = collect([$songPayload['primary_artist']]);
         }
+
+        $featuredPerformerPayloads = collect((array) ($songPayload['featured_artists'] ?? []))
+            ->filter(fn ($artist) => is_array($artist) && isset($artist['id']))
+            ->values();
+
+        $primaryPerformers = new EloquentCollection();
+        $featuredPerformers = new EloquentCollection();
+
+        foreach ($primaryPerformerPayloads as $index => $artistPayload) {
+            [$artist] = $this->upsertArtistFromGenius($index === 0 ? $fallbackArtist : null, $artistPayload);
+            $primaryPerformers->push($artist);
+        }
+
+        foreach ($featuredPerformerPayloads as $artistPayload) {
+            [$artist] = $this->upsertArtistFromGenius(null, $artistPayload);
+            $featuredPerformers->push($artist);
+        }
+
+        $performers = new EloquentCollection(
+            collect($primaryPerformers)
+                ->concat($featuredPerformers)
+                ->unique(fn (Artist $artist) => $artist->id)
+                ->values()
+                ->all()
+        );
 
         if ($performers->isEmpty()) {
             $performers->push($fallbackArtist);
         }
 
-        $primaryArtist = $performers->first();
+        $primaryArtist = $this->resolveTrackPrimaryArtist($fallbackArtist, $primaryPerformers, $performers, $parsedTrack);
+
+        if (! $performers->contains(fn (Artist $artist) => $artist->id === $primaryArtist->id)) {
+            $performers->prepend($primaryArtist);
+        }
 
         $album = null;
         $albumId = null;
 
         if (is_array($songPayload['album'] ?? null) && isset($songPayload['album']['id'])) {
             $albumPayload = $this->geniusClient->album((int) $songPayload['album']['id']) ?? $songPayload['album'];
-            [$album] = $this->upsertAlbumFromGenius($primaryArtist, $albumPayload);
+            [$album] = $this->upsertAlbumFromGenius($fallbackArtist, $albumPayload);
             $albumId = $album->id;
         }
 
@@ -592,9 +620,10 @@ class GeniusCatalogSyncService
             'duration_seconds' => $parsedTrack->durationSeconds,
             'audio_url' => $parsedTrack->audioUrl,
             'release_year' => $this->resolveReleaseYear($songPayload, $parsedTrack),
+            'track_number' => $this->resolveTrackNumber($parsedTrack, $songPayload),
             'genres' => $genres !== [] ? $genres : ($parsedTrack->genres !== [] ? array_values(array_unique($parsedTrack->genres)) : null),
             'language' => GeniusNameMatcher::resolveLanguageCode((array) ($songPayload['tags'] ?? []), $songPayload['language'] ?? null),
-            'description_preview' => isset($songPayload['description_preview']) ? GeniusNameMatcher::forceUtf8((string) $songPayload['description_preview']) : null,
+            'description_preview' => GeniusNameMatcher::cleanDescriptionPreview($songPayload['description_preview'] ?? null),
             'genius_url' => $songPayload['url'] ?? null,
             'cover_image_url' => $album ? null : ($songPayload['song_art_image_url'] ?? $songPayload['header_image_url'] ?? null),
             'genius_id' => (int) $songPayload['id'],
@@ -617,6 +646,127 @@ class GeniusCatalogSyncService
         $track->artists()->sync($performers->pluck('id')->unique()->values()->all());
 
         return [$track, $created];
+    }
+
+    private function resolvePreferredAlbumArtist(Artist $fallbackArtist, EloquentCollection $albumArtists): Artist
+    {
+        foreach ($albumArtists as $albumArtist) {
+            if ($albumArtist instanceof Artist && $this->artistMatchesFallback($albumArtist, $fallbackArtist)) {
+                return $albumArtist;
+            }
+        }
+
+        /** @var Artist|null $firstAlbumArtist */
+        $firstAlbumArtist = $albumArtists->first();
+
+        if ($firstAlbumArtist && ! $this->isVariousArtistsName($firstAlbumArtist->name)) {
+            return $firstAlbumArtist;
+        }
+
+        return $fallbackArtist;
+    }
+
+    private function resolveTrackPrimaryArtist(
+        Artist $fallbackArtist,
+        EloquentCollection $primaryPerformers,
+        EloquentCollection $performers,
+        ParsedTrack $parsedTrack,
+    ): Artist {
+        foreach ($primaryPerformers as $primaryPerformer) {
+            if ($primaryPerformer instanceof Artist && $this->artistMatchesFallback($primaryPerformer, $fallbackArtist)) {
+                return $primaryPerformer;
+            }
+        }
+
+        $bestArtist = null;
+        $bestScore = 0.0;
+
+        foreach ($primaryPerformers as $primaryPerformer) {
+            if (! $primaryPerformer instanceof Artist) {
+                continue;
+            }
+
+            $score = max(
+                GeniusNameMatcher::bestArtistScore($fallbackArtist->name, [$primaryPerformer->name]),
+                GeniusNameMatcher::bestArtistScore($primaryPerformer->name, $parsedTrack->artistNames),
+            );
+
+            if ($score > $bestScore) {
+                $bestArtist = $primaryPerformer;
+                $bestScore = $score;
+            }
+        }
+
+        if ($bestArtist instanceof Artist && $bestScore >= 0.82) {
+            return $bestArtist;
+        }
+
+        /** @var Artist|null $firstPrimary */
+        $firstPrimary = $primaryPerformers->first();
+
+        if ($firstPrimary instanceof Artist && ! $this->isVariousArtistsName($firstPrimary->name)) {
+            return $firstPrimary;
+        }
+
+        if ($performers->contains(fn (Artist $artist) => $this->artistMatchesFallback($artist, $fallbackArtist))) {
+            return $fallbackArtist;
+        }
+
+        return $fallbackArtist;
+    }
+
+    private function resolveTrackNumber(ParsedTrack $parsedTrack, array $songPayload): ?int
+    {
+        $directTrackNumber = (int) (
+            $songPayload['song_number']
+                ?? $songPayload['track_number']
+                ?? $songPayload['number']
+                ?? data_get($songPayload, 'album_appearance.track_number')
+                ?? 0
+        );
+
+        if ($directTrackNumber > 0) {
+            return $directTrackNumber;
+        }
+
+        $albumId = (int) data_get($songPayload, 'album.id', 0);
+        $songId = (int) ($songPayload['id'] ?? 0);
+
+        if ($albumId > 0 && $songId > 0) {
+            $trackNumbers = $this->geniusClient->albumTrackNumbers(
+                $albumId,
+                is_string(data_get($songPayload, 'album.url')) ? (string) data_get($songPayload, 'album.url') : null,
+            );
+
+            if (isset($trackNumbers[$songId]) && (int) $trackNumbers[$songId] > 0) {
+                return (int) $trackNumbers[$songId];
+            }
+        }
+
+        return $parsedTrack->trackNumber;
+    }
+
+    private function artistMatchesFallback(Artist $candidate, Artist $fallbackArtist): bool
+    {
+        if ($candidate->id === $fallbackArtist->id) {
+            return true;
+        }
+
+        if ($candidate->genius_id && $fallbackArtist->genius_id && (int) $candidate->genius_id === (int) $fallbackArtist->genius_id) {
+            return true;
+        }
+
+        return GeniusNameMatcher::bestArtistScore($fallbackArtist->name, [$candidate->name]) >= 0.82;
+    }
+
+    private function isVariousArtistsName(?string $name): bool
+    {
+        return in_array(GeniusNameMatcher::normalizeLoose((string) ($name ?? '')), [
+            'various artists',
+            'various',
+            'raznye ispolniteli',
+            'sbornik',
+        ], true);
     }
 
     private function resolveReleaseYear(array $songPayload, ParsedTrack $parsedTrack): ?int
@@ -751,6 +901,7 @@ class GeniusCatalogSyncService
             'duration_seconds' => $parsedTrack->durationSeconds,
             'audio_url' => $parsedTrack->audioUrl,
             'release_year' => $parsedTrack->releaseYear,
+            'track_number' => $parsedTrack->trackNumber,
             'genres' => $parsedTrack->genres !== [] ? array_values(array_unique($parsedTrack->genres)) : null,
             'genius_pageviews' => 0,
         ]);

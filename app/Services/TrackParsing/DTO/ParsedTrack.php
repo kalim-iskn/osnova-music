@@ -13,6 +13,7 @@ final class ParsedTrack
         public int $durationSeconds,
         public string $audioUrl,
         public ?string $albumTitle,
+        public ?int $trackNumber = null,
         public array $artistNames = [],
         public ?int $releaseYear = null,
         public array $genres = [],
