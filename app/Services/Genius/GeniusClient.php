@@ -30,9 +30,9 @@ class GeniusClient
         $this->baseUrl = rtrim((string) config('services.genius.base_url', 'https://genius.com/api'), '/');
         $this->timeout = max(5, (int) config('services.genius.timeout', 20));
         $this->cacheTtl = max(60, (int) config('services.genius.cache_ttl', 86400));
-        $this->songsPerPage = max(10, (int) config('services.genius.songs_per_page', 20));
-        $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 20));
-        $this->maxPages = max(1, (int) config('services.genius.max_pages', 25));
+        $this->songsPerPage = max(10, (int) config('services.genius.songs_per_page', 50));
+        $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
+        $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
     }
 
@@ -70,6 +70,35 @@ class GeniusClient
         $payload = $this->get('artists/' . $geniusId, [], 'artist:' . $geniusId);
 
         return Arr::get($payload, 'response.artist');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function searchSongs(string $query): array
+    {
+        $payload = $this->get('search', [
+            'q' => $query,
+        ], 'search-song:' . md5($query), allowFailure: true);
+
+        $hits = collect((array) Arr::get($payload, 'response.hits', []))
+            ->filter(fn ($hit) => is_array($hit))
+            ->values();
+
+        if ($hits->isEmpty()) {
+            $hits = collect((array) Arr::get($payload, 'response.sections', []))
+                ->filter(fn ($section) => is_array($section) && ($section['type'] ?? null) === 'song')
+                ->flatMap(fn (array $section) => (array) ($section['hits'] ?? []))
+                ->filter(fn ($hit) => is_array($hit))
+                ->values();
+        }
+
+        return $hits
+            ->map(fn (array $hit) => is_array($hit['result'] ?? null) ? $hit['result'] : null)
+            ->filter()
+            ->unique(fn (array $song) => (int) ($song['id'] ?? 0))
+            ->values()
+            ->all();
     }
 
     /**
@@ -126,6 +155,7 @@ class GeniusClient
             $payload = $this->get('artists/' . $artistId . '/songs', [
                 'page' => $page,
                 'per_page' => $this->songsPerPage,
+                'include_features' => true,
             ], 'artist-songs:' . $artistId . ':' . $page);
 
             $items = collect((array) Arr::get($payload, 'response.songs', []))

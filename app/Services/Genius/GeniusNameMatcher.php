@@ -68,7 +68,7 @@ class GeniusNameMatcher
         }
 
         if (is_string($value)) {
-            return self::repairMojibake(self::forceUtf8($value));
+            return self::cleanTextValue($value);
         }
 
         return $value;
@@ -142,10 +142,7 @@ class GeniusNameMatcher
 
     public static function storageValue(string $value): string
     {
-        $value = self::repairMojibake(self::forceUtf8($value));
-        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
-        $value = self::cleanWhitespace($value);
+        $value = self::cleanTextValue($value);
 
         if ($value === '') {
             return '';
@@ -175,13 +172,12 @@ class GeniusNameMatcher
 
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
 
-        return trim($value, " \t\n\r\0\x0B-–—");
+        return preg_replace('/^[\s\p{Pd}]+|[\s\p{Pd}]+$/u', '', $value) ?? trim($value);
     }
 
     public static function cleanDescriptionPreview(?string $value): ?string
     {
-        $value = self::repairMojibake(self::forceUtf8((string) ($value ?? '')));
-        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = self::cleanTextValue((string) ($value ?? ''));
         $value = strip_tags($value);
         $value = self::cleanWhitespace($value);
 
@@ -192,7 +188,7 @@ class GeniusNameMatcher
         $value = preg_replace('/\b(?:Read More|More on Genius|Подробнее)\b.*$/iu', '', $value) ?? $value;
         $value = self::trimSocialTail($value);
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
-        $value = trim($value, " \t\n\r\0\x0B-–—,.!?:;");
+        $value = preg_replace('/^[\s\p{Pd},.!?:;]+|[\s\p{Pd},.!?:;]+$/u', '', $value) ?? trim($value);
 
         return $value !== '' ? $value : null;
     }
@@ -221,6 +217,38 @@ class GeniusNameMatcher
         }
 
         return $title;
+    }
+
+    /**
+     * @return string[]
+     */
+    public static function splitArtistCredits(string $value, ?string $anchorArtist = null): array
+    {
+        $value = self::storageValue($value);
+        $anchorArtist = $anchorArtist !== null ? self::storageValue($anchorArtist) : null;
+
+        if ($value === '') {
+            return [];
+        }
+
+        if ($anchorArtist !== null && $anchorArtist !== '' && self::bestArtistScore($anchorArtist, [$value]) >= 0.985) {
+            return [$value];
+        }
+
+        $value = preg_replace('/\b(feat(?:uring)?|ft|feature|with|vs|versus|pres(?:ents)?)\b\.?/iu', ',', $value) ?? $value;
+        $value = preg_replace('/\s+(?:x|×|\+)\s+/u', ',', $value) ?? $value;
+        $value = preg_replace('/\s+\x{00D7}\s+/u', ',', $value) ?? $value;
+        $value = str_replace(['&', ';', '/'], ',', $value);
+
+        $artists = collect(explode(',', $value))
+            ->flatMap(fn (string $segment) => self::splitConjoinedArtistSegment($segment, $anchorArtist))
+            ->map(fn (string $artist) => self::storageValue($artist))
+            ->filter()
+            ->unique(fn (string $artist) => Str::lower($artist))
+            ->values()
+            ->all();
+
+        return $artists !== [] ? $artists : [$value];
     }
 
     /**
@@ -355,6 +383,54 @@ class GeniusNameMatcher
             ->map(fn (string $item) => self::cleanWhitespace($item))
             ->filter()
             ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return string[]
+     */
+    public static function songSearchQueries(string $artistName, string $title): array
+    {
+        $artistVariants = self::artistSearchQueries($artistName);
+        $title = self::normalizeStoredTrackTitle($title);
+        $titleVariants = collect([
+            $title,
+            self::storageValue($title),
+            self::transliterateCyrillic($title),
+            self::transliterateLatinToCyrillic($title),
+        ])
+            ->map(fn ($variant) => self::cleanWhitespace((string) $variant))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $queries = collect($artistVariants)
+            ->take(5)
+            ->flatMap(function (string $artistVariant) use ($titleVariants): array {
+                $pairs = [];
+
+                foreach (array_slice($titleVariants, 0, 4) as $titleVariant) {
+                    $query = self::cleanWhitespace($artistVariant . ' ' . $titleVariant);
+
+                    if ($query !== '') {
+                        $pairs[] = $query;
+                    }
+                }
+
+                return $pairs;
+            })
+            ->values();
+
+        if ($title !== '') {
+            $queries->push($title);
+        }
+
+        return $queries
+            ->filter()
+            ->unique()
+            ->take(18)
             ->values()
             ->all();
     }
@@ -560,6 +636,16 @@ class GeniusNameMatcher
         return round($best, 4);
     }
 
+    private static function cleanTextValue(string $value): string
+    {
+        $value = self::repairMojibake(self::forceUtf8($value));
+        $value = self::normalizeCommonBrokenSymbols($value);
+        $value = str_replace(['вЂ‹', 'вЂЊ', 'вЂЌ', 'вЂЋ', 'вЂЏ', 'вЃ '], '', $value);
+        $value = self::stripInvisibleFormattingCharacters($value);
+
+        return self::cleanWhitespace($value);
+    }
+
     private static function cleanWhitespace(string $value): string
     {
         $value = self::forceUtf8($value);
@@ -574,7 +660,53 @@ class GeniusNameMatcher
 
         return trim($value);
     }
+    /**
+     * @param  string[]  $parts
+     * @return string[]
+     */
+    private static function splitConjoinedArtistSegment(string $segment, ?string $anchorArtist = null): array
+    {
+        $segment = self::storageValue($segment);
+        $segment = preg_replace('/\s+\x{0438}\s+/iu', ' and ', $segment) ?? $segment;
 
+        if ($segment === '' || preg_match('/\s+(?:and|и)\s+/iu', $segment) !== 1) {
+            return $segment === '' ? [] : [$segment];
+        }
+
+        $parts = preg_split('/\s+(?:and|и)\s+/iu', $segment) ?: [$segment];
+        $parts = array_values(array_filter(array_map(fn (string $part) => self::storageValue($part), $parts)));
+
+        if (count($parts) < 2 || ! self::shouldSplitConjoinedArtistSegment($segment, $parts, $anchorArtist)) {
+            return [$segment];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * @param  string[]  $parts
+     */
+    private static function shouldSplitConjoinedArtistSegment(string $segment, array $parts, ?string $anchorArtist = null): bool
+    {
+        if ($anchorArtist !== null && $anchorArtist !== '') {
+            if (self::bestArtistScore($anchorArtist, [$segment]) >= 0.985) {
+                return false;
+            }
+
+            foreach ($parts as $part) {
+                if (self::bestArtistScore($anchorArtist, [$part]) >= 0.92) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static function stripInvisibleFormattingCharacters(string $value): string
+    {
+        return preg_replace('/[\x{00AD}\x{034F}\x{061C}\x{180E}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{206F}\x{FE00}-\x{FE0F}\x{FEFF}]/u', '', $value) ?? $value;
+    }
 
     private static function normalizeCommonBrokenSymbols(string $value): string
     {

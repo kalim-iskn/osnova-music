@@ -133,7 +133,13 @@ class GeniusCatalogSyncService
      * @param  array<int, array<string, mixed>>  $songSummaries
      * @return array{summary: array<string, mixed>, detail: array<string, mixed>}|null
      */
-    private function findBestSongMatch(ParsedArtistPage $page, ParsedTrack $parsedTrack, array $songSummaries, array $usedSongIds = []): ?array
+    private function findBestSongMatch(
+        ParsedArtistPage $page,
+        ParsedTrack $parsedTrack,
+        array $songSummaries,
+        array $usedSongIds = [],
+        bool $allowSearchFallback = true,
+    ): ?array
     {
         $parsedTitle = GeniusNameMatcher::canonicalTrack($parsedTrack->title);
         $parsedAlbumTitle = $this->shouldPersistAlbumTitle($parsedTrack->albumTitle)
@@ -175,13 +181,16 @@ class GeniusCatalogSyncService
                 'score' => $score + $artistBoost + $albumPresenceBoost - $duplicatePenalty,
                 'song' => $songSummary,
                 'used' => in_array((int) ($songSummary['id'] ?? 0), $usedSongIds, true),
+                'demo' => $songAlbumTitle ? $this->hasDemoMarkers($songAlbumTitle) : false,
                 'compilation' => $songAlbumTitle ? $this->hasCompilationMarkers($songAlbumTitle) : false,
-                'release_year' => (int) data_get($songSummary, 'release_date_components.year', 0),
+                'release_sort' => $this->releaseSortValue($songSummary),
             ];
         }
 
         if ($candidates === []) {
-            return null;
+            return $allowSearchFallback
+                ? $this->findBestSongMatchFromSearch($page, $parsedTrack, $usedSongIds)
+                : null;
         }
 
         usort($candidates, function (array $left, array $right): int {
@@ -189,10 +198,11 @@ class GeniusCatalogSyncService
                 return $left['used'] <=> $right['used'];
             }
 
-            $scoreComparison = $right['score'] <=> $left['score'];
+            $leftDemo = (bool) ($left['demo'] ?? false);
+            $rightDemo = (bool) ($right['demo'] ?? false);
 
-            if ($scoreComparison !== 0) {
-                return $scoreComparison;
+            if ($leftDemo !== $rightDemo) {
+                return $leftDemo <=> $rightDemo;
             }
 
             $leftCompilation = (bool) ($left['compilation'] ?? false);
@@ -202,17 +212,17 @@ class GeniusCatalogSyncService
                 return $leftCompilation <=> $rightCompilation;
             }
 
-            $leftYear = (int) ($left['release_year'] ?? 0);
-            $rightYear = (int) ($right['release_year'] ?? 0);
+            $leftReleaseSort = (int) ($left['release_sort'] ?? PHP_INT_MAX);
+            $rightReleaseSort = (int) ($right['release_sort'] ?? PHP_INT_MAX);
 
-            if ($leftYear > 0 && $rightYear > 0 && $leftYear !== $rightYear) {
-                return $leftYear <=> $rightYear;
+            if ($leftReleaseSort !== $rightReleaseSort) {
+                return $leftReleaseSort <=> $rightReleaseSort;
             }
 
-            return 0;
+            return $right['score'] <=> $left['score'];
         });
 
-        foreach (array_slice($candidates, 0, 6) as $candidate) {
+        foreach (array_slice($candidates, 0, 18) as $candidate) {
             $songSummary = $candidate['song'] ?? null;
 
             if (! is_array($songSummary) || empty($songSummary['id'])) {
@@ -225,7 +235,7 @@ class GeniusCatalogSyncService
                 continue;
             }
 
-            if (! $this->songPrimaryArtistMatchesPage($songDetail, $page->artistName)) {
+            if (! $this->songMatchesArtistPage($songDetail, $page->artistName)) {
                 continue;
             }
 
@@ -243,7 +253,27 @@ class GeniusCatalogSyncService
             ];
         }
 
-        return null;
+        return $allowSearchFallback
+            ? $this->findBestSongMatchFromSearch($page, $parsedTrack, $usedSongIds)
+            : null;
+    }
+
+    /**
+     * @return array{summary: array<string, mixed>, detail: array<string, mixed>}|null
+     */
+    private function findBestSongMatchFromSearch(ParsedArtistPage $page, ParsedTrack $parsedTrack, array $usedSongIds = []): ?array
+    {
+        $searchResults = collect(GeniusNameMatcher::songSearchQueries($page->artistName, $parsedTrack->title))
+            ->flatMap(fn (string $query) => $this->geniusClient->searchSongs($query))
+            ->unique(fn (array $song) => (int) ($song['id'] ?? 0))
+            ->values()
+            ->all();
+
+        if ($searchResults === []) {
+            return null;
+        }
+
+        return $this->findBestSongMatch($page, $parsedTrack, $searchResults, $usedSongIds, false);
     }
 
     /**
@@ -341,7 +371,7 @@ class GeniusCatalogSyncService
         }
 
         $songs = collect($this->geniusClient->allArtistSongs($artistId))
-            ->take(25)
+            ->take(120)
             ->map(fn (array $song) => GeniusNameMatcher::canonicalTrack((string) ($song['title'] ?? '')))
             ->filter()
             ->values();
@@ -372,8 +402,7 @@ class GeniusCatalogSyncService
                     continue;
                 }
 
-                $artistNames = preg_split('/\s*(?:,|&|\+|x|feat(?:uring)?|ft)\s*/iu', $value) ?: [];
-                $artistNames = array_values(array_filter(array_map('trim', $artistNames)));
+                $artistNames = GeniusNameMatcher::splitArtistCredits($value, $artistName);
 
                 if ($artistNames !== []) {
                     break;
@@ -396,7 +425,17 @@ class GeniusCatalogSyncService
             $primaryArtistNames[] = (string) ($songSummary['primary_artist']['name'] ?? '');
         }
 
+        if ($primaryArtistNames === [] && is_string($songSummary['primary_artist_names'] ?? null)) {
+            $primaryArtistNames = GeniusNameMatcher::splitArtistCredits((string) $songSummary['primary_artist_names'], $artistName);
+        }
+
         return GeniusNameMatcher::bestArtistScore($artistName, $primaryArtistNames) >= 0.82;
+    }
+
+    private function songMatchesArtistPage(array $songSummary, string $artistName): bool
+    {
+        return $this->songPrimaryArtistMatchesPage($songSummary, $artistName)
+            || $this->songContainsArtist($songSummary, $artistName);
     }
 
     private function songTitleMatchesParsedTrack(ParsedTrack $parsedTrack, array $songPayload): bool
@@ -982,6 +1021,27 @@ class GeniusCatalogSyncService
         return $parsedTrack->releaseYear;
     }
 
+    private function releaseSortValue(array $payload): int
+    {
+        $year = (int) data_get($payload, 'release_date_components.year', 0);
+        $month = (int) data_get($payload, 'release_date_components.month', 0);
+        $day = (int) data_get($payload, 'release_date_components.day', 0);
+
+        if ($year > 0) {
+            return ($year * 10000) + (max(1, $month) * 100) + max(1, $day);
+        }
+
+        $releaseDate = (string) ($payload['release_date'] ?? data_get($payload, 'album.release_date', ''));
+
+        if ($releaseDate !== '' && preg_match('/\b(?<year>(?:19|20)\d{2})(?:-(?<month>\d{1,2}))?(?:-(?<day>\d{1,2}))?\b/', $releaseDate, $matches) === 1) {
+            return ((int) ($matches['year'] ?? 0) * 10000)
+                + (max(1, (int) ($matches['month'] ?? 1)) * 100)
+                + max(1, (int) ($matches['day'] ?? 1));
+        }
+
+        return PHP_INT_MAX;
+    }
+
     /**
      * @return Artist[]
      */
@@ -990,13 +1050,15 @@ class GeniusCatalogSyncService
         $artists = [$primaryArtist];
 
         foreach ($parsedTrack->artistNames as $artistName) {
-            $normalizedName = GeniusNameMatcher::normalizeLoose($artistName);
+            foreach (GeniusNameMatcher::splitArtistCredits($artistName, $page->artistName) as $creditedArtistName) {
+                $normalizedName = GeniusNameMatcher::normalizeLoose($creditedArtistName);
 
-            if ($normalizedName === '' || $normalizedName === GeniusNameMatcher::normalizeLoose($page->artistName)) {
-                continue;
+                if ($normalizedName === '' || $normalizedName === GeniusNameMatcher::normalizeLoose($page->artistName)) {
+                    continue;
+                }
+
+                $artists[] = $this->upsertArtistByName($creditedArtistName);
             }
-
-            $artists[] = $this->upsertArtistByName($artistName);
         }
 
         return collect($artists)
@@ -1189,18 +1251,25 @@ class GeniusCatalogSyncService
 
         $muzofondHasCompilationMarkers = $this->hasCompilationMarkers($muzofondAlbumTitle);
         $geniusHasCompilationMarkers = $this->hasCompilationMarkers($geniusAlbumTitle);
+        $muzofondHasDemoMarkers = $this->hasDemoMarkers($muzofondAlbumTitle);
+        $geniusHasDemoMarkers = $this->hasDemoMarkers($geniusAlbumTitle);
+        $penalty = 0.0;
 
         if (! $muzofondHasCompilationMarkers && $geniusHasCompilationMarkers) {
-            return -0.24;
+            $penalty -= 0.24;
+        }
+
+        if (! $muzofondHasDemoMarkers && $geniusHasDemoMarkers) {
+            $penalty -= 0.18;
         }
 
         if ((str_contains($normalizedGenius, $normalizedMuzofond) || str_contains($normalizedMuzofond, $normalizedGenius))
             && $this->versionFlags($muzofondAlbumTitle) === []
             && $this->versionFlags($geniusAlbumTitle) === []) {
-            return -0.18;
+            $penalty -= 0.18;
         }
 
-        return 0.0;
+        return $penalty;
     }
 
     private function hasCompilationMarkers(string $title): bool
@@ -1208,6 +1277,11 @@ class GeniusCatalogSyncService
         $normalized = GeniusNameMatcher::normalizeLoose($title);
 
         return preg_match('/\b(?:best of|greatest hits|hits|anthology|collection|collected|essentials|complete|selected|singles|compilation|box set|chapters|chronicles)\b/iu', $normalized) === 1;
+    }
+
+    private function hasDemoMarkers(string $title): bool
+    {
+        return preg_match('/\bdemo\b/iu', GeniusNameMatcher::normalizeLoose($title)) === 1;
     }
 
     private function albumMatchAdjustment(?string $muzofondAlbumTitle, ?string $geniusAlbumTitle, string $muzofondTitle, string $geniusTitle): float

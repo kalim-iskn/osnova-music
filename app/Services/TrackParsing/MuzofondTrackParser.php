@@ -140,7 +140,7 @@ class MuzofondTrackParser
         $imageUrl = $this->extractLargestArtistImage($xpath);
 
         $tracks = collect($pagesHtml)
-            ->flatMap(fn (string $html) => $this->extractTracksFromArtistPage($html))
+            ->flatMap(fn (string $html) => $this->extractTracksFromArtistPage($html, $artistName))
             ->unique(fn (ParsedTrack $track) => Str::lower($track->title . '|' . $track->audioUrl))
             ->values()
             ->all();
@@ -262,7 +262,7 @@ class MuzofondTrackParser
     /**
      * @return ParsedTrack[]
      */
-    private function extractTracksFromArtistPage(string $html): array
+    private function extractTracksFromArtistPage(string $html, string $pageArtistName): array
     {
         $xpath = $this->makeXPath($html);
         $tracks = [];
@@ -338,7 +338,7 @@ class MuzofondTrackParser
             $genres = array_values(array_unique($genres));
 
             $meta = $this->extractTrackMetadata($rawTrackTitle, $genres);
-            $artistNames = $this->extractArtistNames($rowArtists);
+            $artistNames = $this->extractArtistNames($rowArtists, $pageArtistName);
 
             if ($meta['title'] === '' || $artistNames === []) {
                 continue;
@@ -631,7 +631,7 @@ class MuzofondTrackParser
     /**
      * @return string[]
      */
-    private function extractArtistNames(string $rawArtists): array
+    private function extractArtistNames(string $rawArtists, ?string $pageArtistName = null): array
     {
         $value = $this->normalizeText($rawArtists);
 
@@ -641,6 +641,7 @@ class MuzofondTrackParser
 
         $value = preg_replace('/\b(feat(?:uring)?|ft|feature|with)\b\.?/iu', ',', $value) ?? $value;
         $value = preg_replace('/\s+(?:x|×)\s+/u', ',', $value) ?? $value;
+        $value = preg_replace('/\s+\x{00D7}\s+/u', ',', $value) ?? $value;
         $value = str_replace(['&', ';', '/'], ',', $value);
 
         return collect(explode(',', $value))
