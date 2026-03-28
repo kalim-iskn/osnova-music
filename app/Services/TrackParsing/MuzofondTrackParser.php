@@ -7,6 +7,7 @@ use App\Services\TrackParsing\DTO\ParsedArtistPage;
 use App\Services\TrackParsing\DTO\ParsedTrack;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -298,7 +299,7 @@ class MuzofondTrackParser
                 ".//span[contains(concat(' ', normalize-space(@class), ' '), ' artist ')][1]",
             ]);
 
-            $rawTrackTitle = $this->firstNonEmptyTextFromContext($xpath, $item, [
+            $rawTrackTitle = $this->firstNonEmptyRawTextFromContext($xpath, $item, [
                 ".//span[contains(concat(' ', normalize-space(@class), ' '), ' track ')][1]",
             ]);
 
@@ -404,57 +405,7 @@ class MuzofondTrackParser
 
         $absolute = $this->absoluteUrl($src);
 
-        $candidates = [
-            preg_replace('/_small(\.[a-z0-9]+)$/i', '_large$1', $absolute),
-            preg_replace('/_small(\.[a-z0-9]+)$/i', '_big$1', $absolute),
-            preg_replace('/_small(\.[a-z0-9]+)$/i', '_medium$1', $absolute),
-            $absolute,
-        ];
-
-        foreach ($candidates as $candidate) {
-            if (! is_string($candidate) || trim($candidate) === '') {
-                continue;
-            }
-
-            if ($this->remoteFileExists($candidate)) {
-                return $candidate;
-            }
-        }
-
         return $absolute;
-    }
-
-    private function remoteFileExists(string $url): bool
-    {
-        try {
-            $response = Http::timeout(20)
-                ->retry(2, 700)
-                ->withHeaders($this->defaultHeaders())
-                ->withOptions([
-                    'allow_redirects' => true,
-                    'http_errors' => false,
-                    'verify' => false,
-                ])
-                ->head($url);
-
-            if ($response->successful()) {
-                return true;
-            }
-
-            $fallback = Http::timeout(20)
-                ->retry(2, 700)
-                ->withHeaders(array_merge($this->defaultHeaders(), ['Range' => 'bytes=0-0']))
-                ->withOptions([
-                    'allow_redirects' => true,
-                    'http_errors' => false,
-                    'verify' => false,
-                ])
-                ->get($url);
-
-            return $fallback->successful() || $fallback->status() === 206;
-        } catch (Throwable) {
-            return false;
-        }
     }
 
     private function hasNextArtistPage(string $html, int $nextPage): bool
@@ -490,22 +441,42 @@ class MuzofondTrackParser
      */
     private function extractTrackMetadata(string $rawTrackTitle, array $genresFromDescription): array
     {
-        $title = $this->normalizeText($rawTrackTitle);
+        $title = $this->normalizeRawText($rawTrackTitle);
         $title = preg_replace('/\b(новинки|new|новое)\b/iu', '', $title) ?? $title;
-        $title = $this->normalizeText($title);
+        $title = $this->normalizeRawText($title);
         $album = null;
         $year = null;
 
         $metadata = $this->splitTrailingMetadataBlock($title);
 
         if (is_array($metadata)) {
-            $baseTitle = $this->normalizeText((string) ($metadata['title'] ?? ''));
-            $meta = $this->normalizeText((string) ($metadata['meta'] ?? ''));
+            $baseTitle = $this->normalizeRawText((string) ($metadata['title'] ?? ''));
+            $meta = $this->normalizeRawText((string) ($metadata['meta'] ?? ''));
 
             if ($baseTitle !== '' && $meta !== '') {
                 $parsed = $this->parseMetaBlock($meta, $genresFromDescription);
+                $normalizedBaseTitle = GeniusNameMatcher::canonicalTrack($baseTitle);
 
                 if ($parsed['recognized']) {
+                    $normalizedAlbumTitle = GeniusNameMatcher::canonicalTrack((string) ($parsed['album'] ?? ''));
+
+                    if ($parsed['year'] !== null
+                        && $normalizedBaseTitle !== ''
+                        && $normalizedAlbumTitle !== ''
+                        && $normalizedAlbumTitle === $normalizedBaseTitle) {
+                        if ($this->debugParsingEnabled()) {
+                            Log::debug('Muzofond metadata block repeated the track title, album was suppressed.', [
+                                'raw_track_title' => $rawTrackTitle,
+                                'normalized_title' => $baseTitle,
+                                'meta_block' => $meta,
+                                'suppressed_album' => $parsed['album'],
+                                'year' => $parsed['year'],
+                            ]);
+                        }
+
+                        $parsed['album'] = null;
+                    }
+
                     $title = $baseTitle;
                     $album = $parsed['album'];
                     $year = $parsed['year'];
@@ -525,7 +496,7 @@ class MuzofondTrackParser
      */
     private function splitTrailingMetadataBlock(string $title): ?array
     {
-        $title = $this->normalizeText($title);
+        $title = $this->normalizeRawText($title);
 
         if ($title === '' || ! str_ends_with($title, ')')) {
             return null;
@@ -553,8 +524,8 @@ class MuzofondTrackParser
                 continue;
             }
 
-            $baseTitle = $this->normalizeText(mb_substr($title, 0, $position));
-            $meta = $this->normalizeText(mb_substr($title, $position + 1, $length - $position - 2));
+            $baseTitle = $this->normalizeRawText(mb_substr($title, 0, $position));
+            $meta = $this->normalizeRawText(mb_substr($title, $position + 1, $length - $position - 2));
 
             if ($baseTitle === '' || $meta === '') {
                 return null;
@@ -678,6 +649,18 @@ class MuzofondTrackParser
     private function normalizeText(string $value): string
     {
         $value = GeniusNameMatcher::storageValue($value);
+        $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
+        $value = preg_replace('/[[:cntrl:]]+/u', ' ', $value) ?? $value;
+        $value = trim((string) preg_replace('/\s+/u', ' ', $value));
+
+        return trim($value);
+    }
+
+    private function normalizeRawText(string $value): string
+    {
+        $value = GeniusNameMatcher::forceUtf8($value);
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $value = GeniusNameMatcher::forceUtf8($value);
         $value = preg_replace('/\x{FEFF}/u', '', $value) ?? $value;
         $value = preg_replace('/[[:cntrl:]]+/u', ' ', $value) ?? $value;
         $value = trim((string) preg_replace('/\s+/u', ' ', $value));
@@ -817,6 +800,27 @@ class MuzofondTrackParser
         return '';
     }
 
+    private function firstNonEmptyRawTextFromContext(\DOMXPath $xpath, \DOMElement $context, array $queries): string
+    {
+        foreach ($queries as $query) {
+            $nodes = $xpath->query($query, $context);
+
+            if (! $nodes || $nodes->length === 0) {
+                continue;
+            }
+
+            foreach ($nodes as $node) {
+                $text = $this->normalizeRawText($node->textContent ?? '');
+
+                if ($text !== '') {
+                    return $text;
+                }
+            }
+        }
+
+        return '';
+    }
+
     private function firstNonEmptyAttribute(\DOMXPath $xpath, array $queries): ?string
     {
         foreach ($queries as $query) {
@@ -915,5 +919,10 @@ class MuzofondTrackParser
             'Upgrade-Insecure-Requests' => '1',
             'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
         ];
+    }
+
+    private function debugParsingEnabled(): bool
+    {
+        return (bool) config('services.muzofond.debug_parsing', false);
     }
 }

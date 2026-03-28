@@ -36,7 +36,7 @@ class GeniusClient
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
-        $this->cacheVersion = (string) config('services.genius.cache_version', '20260328-1');
+        $this->cacheVersion = (string) config('services.genius.cache_version', '20260328-3');
     }
 
     /**
@@ -122,6 +122,47 @@ class GeniusClient
         $payload = $this->get('albums/' . $geniusId, [], 'album:' . $geniusId);
 
         return Arr::get($payload, 'response.album');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function albumTracks(int $albumId): array
+    {
+        $tracks = [];
+
+        for ($page = 1; $page <= $this->maxPages; $page++) {
+            $payload = $this->get('albums/' . $albumId . '/tracks', [
+                'page' => $page,
+                'per_page' => $this->songsPerPage,
+            ], 'album-tracks:' . $albumId . ':' . $page . ':per:' . $this->songsPerPage, allowFailure: true);
+
+            $items = collect((array) Arr::get($payload, 'response.tracks', []))
+                ->filter(fn ($track) => is_array($track))
+                ->values()
+                ->all();
+
+            if ($items === []) {
+                break;
+            }
+
+            array_push($tracks, ...$items);
+
+            $nextPage = Arr::get($payload, 'response.next_page');
+
+            if (empty($nextPage) || count($items) < $this->songsPerPage) {
+                break;
+            }
+        }
+
+        return collect($tracks)
+            ->unique(function (array $track): int {
+                $song = is_array($track['song'] ?? null) ? $track['song'] : $track;
+
+                return (int) ($song['id'] ?? 0);
+            })
+            ->values()
+            ->all();
     }
 
     /**

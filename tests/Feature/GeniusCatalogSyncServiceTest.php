@@ -426,6 +426,470 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertSame('Original Winter', $track->album?->title);
     }
 
+    public function test_sync_artist_page_prefers_original_album_over_live_release_when_muzofond_album_and_year_match_original(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 77, 'name' => 'Stromae']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 77, 'name' => 'Stromae', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 701,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => '√ (Racine carrée (Live))'],
+                        'release_date_components' => ['year' => 2015, 'month' => 12, 'day' => 1],
+                    ],
+                    [
+                        'id' => 702,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => 'Cheese'],
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    701 => [
+                        'id' => 701,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 801, 'name' => '√ (Racine carrée (Live))', 'url' => 'https://genius.test/albums/801'],
+                        'release_date' => '2015-12-01',
+                        'release_date_components' => ['year' => 2015, 'month' => 12, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/live.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 800],
+                        'url' => 'https://genius.test/songs/701',
+                    ],
+                    702 => [
+                        'id' => 702,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 802, 'name' => 'Cheese', 'url' => 'https://genius.test/albums/802'],
+                        'release_date' => '2010-01-01',
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/cheese.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 600],
+                        'url' => 'https://genius.test/songs/702',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    801 => [
+                        'id' => 801,
+                        'name' => '√ (Racine carrée (Live))',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2015-12-01',
+                        'cover_art_thumbnail_url' => 'https://img.test/live-cover.jpg',
+                    ],
+                    802 => [
+                        'id' => 802,
+                        'name' => 'Cheese',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2010-01-01',
+                        'cover_art_thumbnail_url' => 'https://img.test/cheese-cover.jpg',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return match ($albumId) {
+                    801 => [701 => 9],
+                    802 => [702 => 1],
+                    default => [],
+                };
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Stromae',
+            artistSlug: 'stromae',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Alors On Danse',
+                    durationSeconds: 207,
+                    audioUrl: 'https://audio.test/alors-original.mp3',
+                    albumTitle: 'Cheese',
+                    trackNumber: 1,
+                    artistNames: ['Stromae'],
+                    releaseYear: 2010,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $result = $service->syncArtistPage($page);
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(1, $result['matched_tracks']);
+        $this->assertSame(702, $track->genius_id);
+        $this->assertSame('Cheese', $track->album?->title);
+    }
+
+    public function test_sync_artist_page_falls_back_to_album_tracks_when_artist_song_feed_misses_original_album_version(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 77, 'name' => 'Stromae']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 77, 'name' => 'Stromae', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 801,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => 'Alors On Danse - EP'],
+                        'release_date_components' => ['year' => 2010, 'month' => 9, 'day' => 2],
+                    ],
+                    [
+                        'id' => 802,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => 'в€љ (Racine carrГ©e (Live))'],
+                        'release_date_components' => ['year' => 2009, 'month' => 9, 'day' => 26],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 901,
+                        'name' => 'в€љ (Racine carrГ©e (Live))',
+                        'url' => 'https://genius.test/albums/901',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2009-09-26',
+                        'release_date_components' => ['year' => 2009, 'month' => 9, 'day' => 26],
+                    ],
+                    [
+                        'id' => 902,
+                        'name' => 'Cheese',
+                        'url' => 'https://genius.test/albums/902',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2010-06-14',
+                        'release_date_components' => ['year' => 2010, 'month' => 6, 'day' => 14],
+                    ],
+                ];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function albumTracks(int $albumId): array
+            {
+                return match ($albumId) {
+                    901 => [[
+                        'number' => 9,
+                        'song' => [
+                            'id' => 802,
+                            'title' => 'Alors On Danse',
+                            'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        ],
+                    ]],
+                    902 => [[
+                        'number' => 1,
+                        'song' => [
+                            'id' => 803,
+                            'title' => 'Alors On Danse',
+                            'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        ],
+                    ]],
+                    default => [],
+                };
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    801 => [
+                        'id' => 801,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 903, 'name' => 'Alors On Danse - EP', 'url' => 'https://genius.test/albums/903'],
+                        'release_date' => '2010-09-02',
+                        'release_date_components' => ['year' => 2010, 'month' => 9, 'day' => 2],
+                        'song_art_image_url' => 'https://img.test/ep.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 400],
+                        'url' => 'https://genius.test/songs/801',
+                    ],
+                    802 => [
+                        'id' => 802,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 901, 'name' => 'в€љ (Racine carrГ©e (Live))', 'url' => 'https://genius.test/albums/901'],
+                        'release_date' => '2009-09-26',
+                        'release_date_components' => ['year' => 2009, 'month' => 9, 'day' => 26],
+                        'song_art_image_url' => 'https://img.test/live.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 500],
+                        'url' => 'https://genius.test/songs/802',
+                    ],
+                    803 => [
+                        'id' => 803,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 902, 'name' => 'Cheese', 'url' => 'https://genius.test/albums/902'],
+                        'release_date' => '2010-06-14',
+                        'release_date_components' => ['year' => 2010, 'month' => 6, 'day' => 14],
+                        'song_art_image_url' => 'https://img.test/cheese.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 350],
+                        'url' => 'https://genius.test/songs/803',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    901 => [
+                        'id' => 901,
+                        'name' => 'в€љ (Racine carrГ©e (Live))',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2009-09-26',
+                        'cover_art_thumbnail_url' => 'https://img.test/live-cover.jpg',
+                    ],
+                    902 => [
+                        'id' => 902,
+                        'name' => 'Cheese',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2010-06-14',
+                        'cover_art_thumbnail_url' => 'https://img.test/cheese-cover.jpg',
+                    ],
+                    903 => [
+                        'id' => 903,
+                        'name' => 'Alors On Danse - EP',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'release_date' => '2010-09-02',
+                        'cover_art_thumbnail_url' => 'https://img.test/ep-cover.jpg',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return match ($albumId) {
+                    901 => [802 => 9],
+                    902 => [803 => 1],
+                    903 => [801 => 1],
+                    default => [],
+                };
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Stromae',
+            artistSlug: 'stromae',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Alors On Danse',
+                    durationSeconds: 207,
+                    audioUrl: 'https://audio.test/alors-from-album-tracks.mp3',
+                    albumTitle: 'Cheese',
+                    trackNumber: 1,
+                    artistNames: ['Stromae'],
+                    releaseYear: 2010,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $result = $service->syncArtistPage($page);
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(1, $result['matched_tracks']);
+        $this->assertSame(803, $track->genius_id);
+        $this->assertSame('Cheese', $track->album?->title);
+    }
+
+    public function test_sync_artist_page_prefers_version_specific_track_when_parsed_title_includes_remix_marker(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 77, 'name' => 'Stromae']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 77, 'name' => 'Stromae', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 901,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => 'Cheese'],
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                    ],
+                    [
+                        'id' => 902,
+                        'title' => 'Alors On Danse (90\'s Remix)',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'album' => ['name' => 'Cheese'],
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    901 => [
+                        'id' => 901,
+                        'title' => 'Alors On Danse',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 903, 'name' => 'Cheese', 'url' => 'https://genius.test/albums/903'],
+                        'release_date' => '2010-01-01',
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/alors-original.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 300],
+                        'url' => 'https://genius.test/songs/901',
+                    ],
+                    902 => [
+                        'id' => 902,
+                        'title' => 'Alors On Danse (90\'s Remix)',
+                        'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 903, 'name' => 'Cheese', 'url' => 'https://genius.test/albums/903'],
+                        'release_date' => '2010-01-01',
+                        'release_date_components' => ['year' => 2010, 'month' => 1, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/alors-remix.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 250],
+                        'url' => 'https://genius.test/songs/902',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 903) {
+                    return null;
+                }
+
+                return [
+                    'id' => 903,
+                    'name' => 'Cheese',
+                    'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                    'release_date' => '2010-01-01',
+                    'cover_art_thumbnail_url' => 'https://img.test/cheese-cover.jpg',
+                ];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return [901 => 1, 902 => 2];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Stromae',
+            artistSlug: 'stromae',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Alors On Danse (90\'s Remix)',
+                    durationSeconds: 173,
+                    audioUrl: 'https://audio.test/alors-remix.mp3',
+                    albumTitle: 'Cheese',
+                    trackNumber: 1,
+                    artistNames: ['Stromae'],
+                    releaseYear: 2010,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $result = $service->syncArtistPage($page);
+        $track = Track::query()->firstOrFail();
+
+        $this->assertSame(1, $result['matched_tracks']);
+        $this->assertSame(902, $track->genius_id);
+    }
+
     public function test_sync_artist_page_splits_fallback_artist_names_when_track_is_unmatched(): void
     {
         $client = new class() extends GeniusClient {

@@ -16,6 +16,8 @@ class ParseTracksCommand extends Command
         {url : Artist page URL or artists listing URL}
         {--artist-limit=0 : Limit how many artists should be parsed from listing pages}
         {--page-limit=0 : Limit pagination depth for parser pages, 0 = no limit}
+        {--debug-matching : Write detailed Genius matching diagnostics into the Laravel log}
+        {--debug-parsing : Write detailed Muzofond parsing diagnostics into the Laravel log}
         {--dry-run : Parse only, do not save anything}';
 
     protected $description = 'Parse tracks from a remote page and save artists, albums and tracks into the local catalog';
@@ -29,6 +31,16 @@ class ParseTracksCommand extends Command
         $artistLimit = max((int) $this->option('artist-limit'), 0);
         $pageLimit = max((int) $this->option('page-limit'), 0);
         $dryRun = (bool) $this->option('dry-run');
+        $debugMatching = (bool) $this->option('debug-matching');
+        $debugParsing = (bool) $this->option('debug-parsing');
+
+        if ($debugMatching) {
+            config()->set('services.genius.debug_matching', true);
+        }
+
+        if ($debugParsing) {
+            config()->set('services.muzofond.debug_parsing', true);
+        }
 
         if (! filter_var($url, FILTER_VALIDATE_URL)) {
             $this->error('Передан некорректный URL.');
