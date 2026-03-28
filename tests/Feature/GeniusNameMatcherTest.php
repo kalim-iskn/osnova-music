@@ -21,4 +21,14 @@ class GeniusNameMatcherTest extends TestCase
 
         $this->assertSame(['Saluki', 'Anikv'], $artists);
     }
+
+    public function test_song_search_queries_include_album_variants_when_album_is_known(): void
+    {
+        $queries = GeniusNameMatcher::songSearchQueries('Mayot', 'Snow', 'Ghetto Garden');
+
+        $this->assertContains('Mayot Snow Ghetto Garden', $queries);
+        $this->assertTrue(
+            collect($queries)->contains(fn (string $query) => str_contains($query, 'Snow') && str_contains($query, 'Ghetto Garden'))
+        );
+    }
 }

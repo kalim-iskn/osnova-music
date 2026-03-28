@@ -390,15 +390,28 @@ class GeniusNameMatcher
     /**
      * @return string[]
      */
-    public static function songSearchQueries(string $artistName, string $title): array
+    public static function songSearchQueries(string $artistName, string $title, ?string $albumTitle = null): array
     {
         $artistVariants = self::artistSearchQueries($artistName);
         $title = self::normalizeStoredTrackTitle($title);
+        $albumTitle = self::shouldUseAlbumInSongSearch($albumTitle)
+            ? self::storageValue((string) $albumTitle)
+            : '';
         $titleVariants = collect([
             $title,
             self::storageValue($title),
             self::transliterateCyrillic($title),
             self::transliterateLatinToCyrillic($title),
+        ])
+            ->map(fn ($variant) => self::cleanWhitespace((string) $variant))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $albumVariants = collect([
+            $albumTitle,
+            self::transliterateCyrillic($albumTitle),
+            self::transliterateLatinToCyrillic($albumTitle),
         ])
             ->map(fn ($variant) => self::cleanWhitespace((string) $variant))
             ->filter()
@@ -423,14 +436,45 @@ class GeniusNameMatcher
             })
             ->values();
 
+        if ($albumVariants !== []) {
+            $queries = $queries->merge(
+                collect($artistVariants)
+                    ->take(4)
+                    ->flatMap(function (string $artistVariant) use ($titleVariants, $albumVariants): array {
+                        $pairs = [];
+
+                        foreach (array_slice($titleVariants, 0, 3) as $titleVariant) {
+                            foreach (array_slice($albumVariants, 0, 3) as $albumVariant) {
+                                foreach ([
+                                    self::cleanWhitespace($artistVariant . ' ' . $titleVariant . ' ' . $albumVariant),
+                                    self::cleanWhitespace($artistVariant . ' ' . $albumVariant . ' ' . $titleVariant),
+                                ] as $query) {
+                                    if ($query !== '') {
+                                        $pairs[] = $query;
+                                    }
+                                }
+                            }
+                        }
+
+                        return $pairs;
+                    })
+            );
+        }
+
         if ($title !== '') {
             $queries->push($title);
+        }
+
+        if ($title !== '' && $albumVariants !== []) {
+            foreach (array_slice($albumVariants, 0, 2) as $albumVariant) {
+                $queries->push(self::cleanWhitespace($title . ' ' . $albumVariant));
+            }
         }
 
         return $queries
             ->filter()
             ->unique()
-            ->take(18)
+            ->take(24)
             ->values()
             ->all();
     }
@@ -706,6 +750,21 @@ class GeniusNameMatcher
     private static function stripInvisibleFormattingCharacters(string $value): string
     {
         return preg_replace('/[\x{00AD}\x{034F}\x{061C}\x{180E}\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{206F}\x{FE00}-\x{FE0F}\x{FEFF}]/u', '', $value) ?? $value;
+    }
+
+    private static function shouldUseAlbumInSongSearch(?string $albumTitle): bool
+    {
+        $normalized = self::normalizeLoose((string) ($albumTitle ?? ''));
+
+        return $normalized !== '' && ! in_array($normalized, [
+            'novinki',
+            'novinka',
+            'new',
+            'news',
+            'popularnoe',
+            'populiarnoe',
+            'top',
+        ], true);
     }
 
     private static function normalizeCommonBrokenSymbols(string $value): string

@@ -298,6 +298,134 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertEqualsCanonicalizing(['Other Artist', 'Mayot'], $track->artists->pluck('name')->all());
     }
 
+    public function test_sync_artist_page_prefers_album_backed_detail_over_albumless_duplicate(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 11, 'name' => 'Mayot']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 11, 'name' => 'Mayot', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 401,
+                        'title' => 'Snow',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'album' => null,
+                        'release_date_components' => ['year' => 2019, 'month' => 12, 'day' => 1],
+                    ],
+                    [
+                        'id' => 402,
+                        'title' => 'Snow',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'album' => null,
+                        'release_date_components' => ['year' => 2020, 'month' => 1, 'day' => 10],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    401 => [
+                        'id' => 401,
+                        'title' => 'Snow',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'featured_artists' => [],
+                        'album' => null,
+                        'release_date' => '2019-12-01',
+                        'release_date_components' => ['year' => 2019, 'month' => 12, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/snow-single.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 400],
+                        'url' => 'https://genius.test/songs/401',
+                    ],
+                    402 => [
+                        'id' => 402,
+                        'title' => 'Snow',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 501, 'name' => 'Original Winter', 'url' => 'https://genius.test/albums/501'],
+                        'release_date' => '2020-01-10',
+                        'release_date_components' => ['year' => 2020, 'month' => 1, 'day' => 10],
+                        'song_art_image_url' => 'https://img.test/snow-album.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 300],
+                        'url' => 'https://genius.test/songs/402',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 501) {
+                    return null;
+                }
+
+                return [
+                    'id' => 501,
+                    'name' => 'Original Winter',
+                    'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                    'release_date' => '2020-01-10',
+                    'cover_art_thumbnail_url' => 'https://img.test/original-winter-cover.jpg',
+                ];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return [402 => 5];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Mayot',
+            artistSlug: 'mayot',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Snow',
+                    durationSeconds: 200,
+                    audioUrl: 'https://audio.test/snow-album-priority.mp3',
+                    albumTitle: null,
+                    trackNumber: 1,
+                    artistNames: ['Mayot'],
+                    releaseYear: null,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $result = $service->syncArtistPage($page);
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(1, $result['matched_tracks']);
+        $this->assertSame(402, $track->genius_id);
+        $this->assertSame('Original Winter', $track->album?->title);
+    }
+
     public function test_sync_artist_page_splits_fallback_artist_names_when_track_is_unmatched(): void
     {
         $client = new class() extends GeniusClient {

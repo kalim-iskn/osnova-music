@@ -25,6 +25,8 @@ class GeniusClient
 
     private ?string $accessToken;
 
+    private string $cacheVersion;
+
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('services.genius.base_url', 'https://genius.com/api'), '/');
@@ -34,6 +36,7 @@ class GeniusClient
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
+        $this->cacheVersion = (string) config('services.genius.cache_version', '20260328-1');
     }
 
     /**
@@ -126,7 +129,7 @@ class GeniusClient
      */
     public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
     {
-        return Cache::remember('album-track-numbers:' . $albumId, $this->cacheTtl, function () use ($albumId, $albumUrl): array {
+        return Cache::remember($this->cacheKey('album-track-numbers:' . $albumId), $this->cacheTtl, function () use ($albumId, $albumUrl): array {
             $albumPayload = $albumUrl ? null : $this->album($albumId);
             $albumUrl ??= is_array($albumPayload) ? (string) ($albumPayload['url'] ?? '') : '';
 
@@ -156,7 +159,7 @@ class GeniusClient
                 'page' => $page,
                 'per_page' => $this->songsPerPage,
                 'include_features' => true,
-            ], 'artist-songs:' . $artistId . ':' . $page);
+            ], 'artist-songs:' . $artistId . ':' . $page . ':per:' . $this->songsPerPage . ':features:1');
 
             $items = collect((array) Arr::get($payload, 'response.songs', []))
                 ->filter(fn ($song) => is_array($song))
@@ -191,7 +194,7 @@ class GeniusClient
             $payload = $this->get('artists/' . $artistId . '/albums', [
                 'page' => $page,
                 'per_page' => $this->albumsPerPage,
-            ], 'artist-albums:' . $artistId . ':' . $page, allowFailure: true);
+            ], 'artist-albums:' . $artistId . ':' . $page . ':per:' . $this->albumsPerPage, allowFailure: true);
 
             $items = collect((array) Arr::get($payload, 'response.albums', []))
                 ->filter(fn ($album) => is_array($album))
@@ -227,7 +230,7 @@ class GeniusClient
      */
     private function get(string $path, array $query = [], ?string $cacheKey = null, bool $allowFailure = false): array
     {
-        $cacheKey ??= 'genius:' . md5($path . ':' . json_encode($query));
+        $cacheKey = $this->cacheKey($cacheKey ?? md5($path . ':' . json_encode($query)));
 
         File::ensureDirectoryExists(storage_path('framework'));
         File::ensureDirectoryExists(storage_path('framework/cache'));
@@ -332,6 +335,11 @@ class GeniusClient
         }
 
         return $value;
+    }
+
+    private function cacheKey(string $key): string
+    {
+        return 'genius:' . $this->cacheVersion . ':' . $key;
     }
 
     private function request(): PendingRequest
