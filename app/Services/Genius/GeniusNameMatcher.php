@@ -157,6 +157,22 @@ class GeniusNameMatcher
             '{' => '(',
             '}' => ')',
         ]);
+
+        while (preg_match('/^(?P<base>.+?)\s*[\(\[\{](?P<meta>[^()\[\]{}]+)[\)\]\}]\s*$/u', $value, $matches) === 1) {
+            $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
+            $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
+
+            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)) {
+                break;
+            }
+
+            if (! self::looksLikeTranslationSuffix($base, $meta)) {
+                break;
+            }
+
+            $value = $base;
+        }
+
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
 
         return trim($value, " \t\n\r\0\x0B-–—");

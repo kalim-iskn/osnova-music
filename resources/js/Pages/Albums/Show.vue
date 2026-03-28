@@ -4,6 +4,7 @@ import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
 import TrackRow from '../../Components/TrackRow.vue';
+import { usePlayerStore } from '../../stores/player';
 import { formatCount } from '../../utils/pluralize';
 
 defineOptions({ layout: AppLayout });
@@ -19,6 +20,23 @@ const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tra
 const albumDescription = computed(() => runtime.value?.album?.description_preview ?? null);
 const displayReleaseDate = computed(() => runtime.value?.album?.release_date ?? props.album.release_date ?? null);
 const albumArtists = computed(() => Array.isArray(props.album?.artists) && props.album.artists.length ? props.album.artists : (props.album?.artist ? [props.album.artist] : []));
+const player = usePlayerStore();
+const firstTrack = computed(() => trackItems.value[0] ?? null);
+const isAlbumCurrent = computed(() => player.currentTrack?.id === firstTrack.value?.id);
+const isAlbumPlaying = computed(() => isAlbumCurrent.value && player.isPlaying);
+
+const toggleAlbumPlayback = async () => {
+    if (!firstTrack.value) {
+        return;
+    }
+
+    if (isAlbumCurrent.value) {
+        await player.togglePlayback();
+        return;
+    }
+
+    await player.playTrack(firstTrack.value, trackItems.value);
+};
 
 const fetchRuntime = async () => {
     if (!props.album?.genius_id || !window.axios) {
@@ -40,7 +58,7 @@ onMounted(fetchRuntime);
     <Head :title="album.title" />
 
     <section class="hero-card hero-card--album album-page__hero-card">
-        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover album-page__hero-cover">
+        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover album-page__hero-cover" role="button" tabindex="0" @click="toggleAlbumPlayback" @keydown.enter.prevent="toggleAlbumPlayback" @keydown.space.prevent="toggleAlbumPlayback">
 
         <div class="album-page__hero-body">
             <span class="eyebrow">Альбом</span>
@@ -63,6 +81,15 @@ onMounted(fetchRuntime);
             <p v-if="albumDescription" class="hero-card__description hero-card__description--text">
                 {{ albumDescription }}
             </p>
+
+            <button
+                type="button"
+                class="album-page__play-button"
+                :disabled="!firstTrack"
+                @click="toggleAlbumPlayback"
+            >
+                {{ isAlbumPlaying ? 'Стоп' : 'Слушать альбом' }}
+            </button>
         </div>
     </section>
 
@@ -98,6 +125,7 @@ onMounted(fetchRuntime);
 
 .album-page__hero-cover {
     align-self: flex-start;
+    cursor: pointer;
 }
 
 .album-page__hero-body {
@@ -112,6 +140,36 @@ onMounted(fetchRuntime);
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
+}
+
+.album-page__play-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 220px;
+    min-height: 48px;
+    padding: 0.85rem 1.4rem;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #7c3aed, #ec4899);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    box-shadow: 0 16px 32px rgba(124, 58, 237, 0.24);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+.album-page__play-button:hover:not(:disabled),
+.album-page__play-button:focus-visible:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 20px 40px rgba(124, 58, 237, 0.3);
+}
+
+.album-page__play-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 @media (max-width: 900px) {

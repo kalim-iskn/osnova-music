@@ -5,6 +5,7 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import SocialIconLink from '../../Components/SocialIconLink.vue';
 import TrackArtists from '../../Components/TrackArtists.vue';
 import TrackRow from '../../Components/TrackRow.vue';
+import { usePlayerStore } from '../../stores/player';
 
 defineOptions({ layout: AppLayout });
 
@@ -47,6 +48,24 @@ const languageLabel = computed(() => {
 const trackDescription = computed(() => runtime.value?.song?.description_preview ?? props.track.description_preview ?? null);
 const currentAlbum = computed(() => props.track.album ?? runtime.value?.song?.album ?? null);
 const runtimeArtistsById = computed(() => new Map((runtime.value?.artists ?? []).map((artist) => [Number(artist.id), artist])));
+const player = usePlayerStore();
+const playbackQueue = computed(() => [props.track, ...props.relatedTracks.filter((relatedTrack) => Number(relatedTrack?.id) !== Number(props.track?.id))]);
+const isTrackCurrent = computed(() => player.currentTrack?.id === props.track?.id);
+const isTrackPlaying = computed(() => isTrackCurrent.value && player.isPlaying);
+
+const toggleTrackPlayback = async () => {
+    if (!props.track) {
+        return;
+    }
+
+    if (isTrackCurrent.value) {
+        await player.togglePlayback();
+        return;
+    }
+
+    await player.playTrack(props.track, playbackQueue.value);
+};
+
 const currentArtists = computed(() => {
     const baseArtists = Array.isArray(props.track.artists) && props.track.artists.length
         ? props.track.artists
@@ -90,7 +109,7 @@ onMounted(fetchRuntime);
     <Head :title="track.title" />
 
     <section class="hero-card hero-card--track track-page__hero-card">
-        <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover track-page__hero-cover">
+        <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover track-page__hero-cover" role="button" tabindex="0" @click="toggleTrackPlayback" @keydown.enter.prevent="toggleTrackPlayback" @keydown.space.prevent="toggleTrackPlayback">
 
         <div class="track-page__hero-body">
             <span class="eyebrow">Трек</span>
@@ -114,6 +133,14 @@ onMounted(fetchRuntime);
                 <span v-if="languageLabel" class="badge">{{ languageLabel }}</span>
                 <span v-for="genre in displayGenres" :key="genre" class="badge">{{ genre }}</span>
             </div>
+
+            <button
+                type="button"
+                class="track-page__play-button"
+                @click="toggleTrackPlayback"
+            >
+                {{ isTrackPlaying ? 'Стоп' : 'Слушать трек' }}
+            </button>
 
             <div v-if="runtimeLoading" class="track-page__status">Загружаю расширенные данные Genius…</div>
         </div>
@@ -230,6 +257,7 @@ onMounted(fetchRuntime);
 
 .track-page__hero-cover {
     align-self: flex-start;
+    cursor: pointer;
 }
 
 .track-page__hero-body {
@@ -249,6 +277,30 @@ onMounted(fetchRuntime);
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
+}
+
+.track-page__play-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 220px;
+    min-height: 48px;
+    padding: 0.85rem 1.4rem;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #7c3aed, #ec4899);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    box-shadow: 0 16px 32px rgba(124, 58, 237, 0.24);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.track-page__play-button:hover,
+.track-page__play-button:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 20px 40px rgba(124, 58, 237, 0.3);
 }
 
 .track-page__content-grid {

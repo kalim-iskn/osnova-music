@@ -639,7 +639,8 @@ class MuzofondTrackParser
             return [];
         }
 
-        $value = preg_replace('/\b(feat(?:uring)?|ft|feature|with|and|x|и)\b\.?/iu', ',', $value) ?? $value;
+        $value = preg_replace('/\b(feat(?:uring)?|ft|feature|with)\b\.?/iu', ',', $value) ?? $value;
+        $value = preg_replace('/\s+(?:x|×)\s+/u', ',', $value) ?? $value;
         $value = str_replace(['&', ';', '/'], ',', $value);
 
         return collect(explode(',', $value))

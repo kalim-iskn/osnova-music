@@ -153,7 +153,7 @@ class GeniusCatalogSyncService
                 continue;
             }
 
-            if (! $this->songPrimaryArtistMatchesPage($songSummary, $page->artistName)) {
+            if (! $this->songContainsArtist($songSummary, $page->artistName)) {
                 continue;
             }
 
@@ -175,6 +175,8 @@ class GeniusCatalogSyncService
                 'score' => $score + $artistBoost + $albumPresenceBoost - $duplicatePenalty,
                 'song' => $songSummary,
                 'used' => in_array((int) ($songSummary['id'] ?? 0), $usedSongIds, true),
+                'compilation' => $songAlbumTitle ? $this->hasCompilationMarkers($songAlbumTitle) : false,
+                'release_year' => (int) data_get($songSummary, 'release_date_components.year', 0),
             ];
         }
 
@@ -187,7 +189,27 @@ class GeniusCatalogSyncService
                 return $left['used'] <=> $right['used'];
             }
 
-            return $right['score'] <=> $left['score'];
+            $scoreComparison = $right['score'] <=> $left['score'];
+
+            if ($scoreComparison !== 0) {
+                return $scoreComparison;
+            }
+
+            $leftCompilation = (bool) ($left['compilation'] ?? false);
+            $rightCompilation = (bool) ($right['compilation'] ?? false);
+
+            if ($leftCompilation !== $rightCompilation) {
+                return $leftCompilation <=> $rightCompilation;
+            }
+
+            $leftYear = (int) ($left['release_year'] ?? 0);
+            $rightYear = (int) ($right['release_year'] ?? 0);
+
+            if ($leftYear > 0 && $rightYear > 0 && $leftYear !== $rightYear) {
+                return $leftYear <=> $rightYear;
+            }
+
+            return 0;
         });
 
         foreach (array_slice($candidates, 0, 6) as $candidate) {
@@ -339,7 +361,25 @@ class GeniusCatalogSyncService
         $artistNames = collect($artists)
             ->map(fn ($artist) => is_array($artist) ? (string) ($artist['name'] ?? '') : '')
             ->filter()
+            ->values()
             ->all();
+
+        if ($artistNames === []) {
+            foreach (['artist_names', 'primary_artist_names'] as $key) {
+                $value = (string) ($songSummary[$key] ?? '');
+
+                if ($value === '') {
+                    continue;
+                }
+
+                $artistNames = preg_split('/\s*(?:,|&|\+|x|feat(?:uring)?|ft)\s*/iu', $value) ?: [];
+                $artistNames = array_values(array_filter(array_map('trim', $artistNames)));
+
+                if ($artistNames !== []) {
+                    break;
+                }
+            }
+        }
 
         return GeniusNameMatcher::bestArtistScore($artistName, $artistNames) >= 0.8;
     }
@@ -497,6 +537,33 @@ class GeniusCatalogSyncService
         return GeniusNameMatcher::bestArtistScore($seedArtist->name, $aliases) >= 0.94;
     }
 
+
+    private function shouldCreateAlbumFromPayload(array $payload): bool
+    {
+        $artistPayloads = collect((array) ($payload['primary_artists'] ?? []))
+            ->filter(fn ($artistPayload) => is_array($artistPayload) && isset($artistPayload['id']))
+            ->values();
+
+        if ($artistPayloads->isEmpty() && is_array($payload['artist'] ?? null) && isset($payload['artist']['id'])) {
+            $artistPayloads = collect([$payload['artist']]);
+        }
+
+        if ($artistPayloads->isEmpty()) {
+            return true;
+        }
+
+        $artistNames = $artistPayloads
+            ->map(fn ($artistPayload) => GeniusNameMatcher::storageValue((string) ($artistPayload['name'] ?? '')))
+            ->filter()
+            ->values();
+
+        if ($artistNames->isEmpty()) {
+            return true;
+        }
+
+        return $artistNames->contains(fn (string $artistName) => ! $this->isVariousArtistsName($artistName));
+    }
+
     private function rejectVariousArtists(EloquentCollection $artists): EloquentCollection
     {
         if ($artists->count() <= 1) {
@@ -519,6 +586,11 @@ class GeniusCatalogSyncService
 
         foreach ($this->geniusClient->allArtistAlbums($geniusArtistId) as $albumSummary) {
             $albumDetail = $this->geniusClient->album((int) $albumSummary['id']) ?? $albumSummary;
+
+            if (! $this->shouldCreateAlbumFromPayload($albumDetail)) {
+                continue;
+            }
+
             [, $albumCreated] = $this->upsertAlbumFromGenius($artist, $albumDetail);
             $created += $albumCreated ? 1 : 0;
         }
@@ -557,6 +629,11 @@ class GeniusCatalogSyncService
 
         foreach ($albumArtistPayloads as $index => $artistPayload) {
             [$albumArtist] = $this->upsertArtistFromGenius($index === 0 ? $fallbackArtist : null, $artistPayload);
+
+            if ($this->isVariousArtistsName($albumArtist->name)) {
+                continue;
+            }
+
             $albumArtists->push($albumArtist);
         }
 
@@ -685,8 +762,11 @@ class GeniusCatalogSyncService
 
         if (is_array($songPayload['album'] ?? null) && isset($songPayload['album']['id'])) {
             $albumPayload = $this->geniusClient->album((int) $songPayload['album']['id']) ?? $songPayload['album'];
-            [$album] = $this->upsertAlbumFromGenius($fallbackArtist, $albumPayload);
-            $albumId = $album->id;
+
+            if ($this->shouldCreateAlbumFromPayload($albumPayload)) {
+                [$album] = $this->upsertAlbumFromGenius($fallbackArtist, $albumPayload);
+                $albumId = $album->id;
+            }
         }
 
         $geniusTitle = GeniusNameMatcher::normalizeStoredTrackTitle((string) ($songPayload['title'] ?? $parsedTrack->title));
@@ -837,18 +917,6 @@ class GeniusCatalogSyncService
 
     private function resolveTrackNumber(ParsedTrack $parsedTrack, array $songPayload): ?int
     {
-        $directTrackNumber = (int) (
-            $songPayload['song_number']
-                ?? $songPayload['track_number']
-                ?? $songPayload['number']
-                ?? data_get($songPayload, 'album_appearance.track_number')
-                ?? 0
-        );
-
-        if ($directTrackNumber > 0) {
-            return $directTrackNumber;
-        }
-
         $albumId = (int) data_get($songPayload, 'album.id', 0);
         $songId = (int) ($songPayload['id'] ?? 0);
 
@@ -861,6 +929,18 @@ class GeniusCatalogSyncService
             if (isset($trackNumbers[$songId]) && (int) $trackNumbers[$songId] > 0) {
                 return (int) $trackNumbers[$songId];
             }
+        }
+
+        $directTrackNumber = (int) (
+            $songPayload['song_number']
+                ?? $songPayload['track_number']
+                ?? $songPayload['number']
+                ?? data_get($songPayload, 'album_appearance.track_number')
+                ?? 0
+        );
+
+        if ($directTrackNumber > 0 && $directTrackNumber <= 80) {
+            return $directTrackNumber;
         }
 
         return $parsedTrack->trackNumber;
