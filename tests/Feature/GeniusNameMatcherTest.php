@@ -31,4 +31,9 @@ class GeniusNameMatcherTest extends TestCase
             collect($queries)->contains(fn (string $query) => str_contains($query, 'Snow') && str_contains($query, 'Ghetto Garden'))
         );
     }
+
+    public function test_album_storage_value_preserves_symbolic_album_titles(): void
+    {
+        $this->assertSame('√ (Racine carree)', GeniusNameMatcher::albumStorageValue('в€љ (Racine carree)'));
+    }
 }

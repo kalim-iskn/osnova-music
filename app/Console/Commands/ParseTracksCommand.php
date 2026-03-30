@@ -5,7 +5,7 @@ namespace App\Console\Commands;
 use App\Services\Genius\GeniusCatalogSyncService;
 use App\Services\TrackParsing\MuzofondTrackParser;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -48,10 +48,14 @@ class ParseTracksCommand extends Command
             return self::FAILURE;
         }
 
+        $parseStartedAt = microtime(true);
+
         $pages = match ($parserKey) {
             'muzofond' => $muzofondParser->parse($url, $artistLimit, $pageLimit),
             default => null,
         };
+
+        $parseDurationMs = (int) round((microtime(true) - $parseStartedAt) * 1000);
 
         if ($pages === null) {
             $this->error(sprintf('Парсер "%s" не поддерживается.', $parserKey));
@@ -60,12 +64,22 @@ class ParseTracksCommand extends Command
         }
 
         if ($pages === []) {
-            $this->warn('Парсер не нашёл артистов или треков.');
+            $this->warn('Парсер не нашел артистов или треков.');
 
             return self::SUCCESS;
         }
 
         $this->info(sprintf('Найдено страниц артистов: %d', count($pages)));
+        $this->line(sprintf('Muzofond parse: %.1f c', $parseDurationMs / 1000));
+
+        Log::info('Track parsing source pages fetched.', [
+            'parser' => $parserKey,
+            'url' => $url,
+            'artist_limit' => $artistLimit,
+            'page_limit' => $pageLimit,
+            'artist_pages' => count($pages),
+            'duration_ms' => $parseDurationMs,
+        ]);
 
         $savedArtists = 0;
         $savedAlbums = 0;
@@ -82,8 +96,11 @@ class ParseTracksCommand extends Command
                 continue;
             }
 
+            $artistStartedAt = microtime(true);
+
             try {
-                $result = DB::transaction(fn () => $geniusCatalogSyncService->syncArtistPage($page));
+                $result = $geniusCatalogSyncService->syncArtistPage($page);
+                $artistDurationMs = (int) round((microtime(true) - $artistStartedAt) * 1000);
 
                 $savedArtists += $result['artists'];
                 $savedAlbums += $result['albums'];
@@ -100,18 +117,45 @@ class ParseTracksCommand extends Command
                 } else {
                     $this->warn('Genius-матч не найден, сохранение выполнено по текущему muzofond-фоллбеку.');
                 }
+
+                $this->line(sprintf('Время обработки: %.1f c', $artistDurationMs / 1000));
+
+                Log::info('Track parsing artist synced.', [
+                    'parser' => $parserKey,
+                    'artist' => $page->artistName,
+                    'artist_slug' => $page->artistSlug,
+                    'muzofond_track_count' => count($page->tracks),
+                    'saved_artists' => $result['artists'],
+                    'saved_albums' => $result['albums'],
+                    'saved_tracks' => $result['tracks'],
+                    'matched_tracks' => $result['matched_tracks'],
+                    'unmatched_tracks' => $result['unmatched_tracks'],
+                    'genius_matched' => $result['genius_matched'],
+                    'duration_ms' => $artistDurationMs,
+                ]);
             } catch (Throwable $exception) {
+                $artistDurationMs = (int) round((microtime(true) - $artistStartedAt) * 1000);
+
                 $this->error(sprintf(
                     'Ошибка при сохранении артиста "%s": %s',
                     $page->artistName,
                     $exception->getMessage(),
                 ));
+
+                Log::error('Track parsing artist sync failed.', [
+                    'parser' => $parserKey,
+                    'artist' => $page->artistName,
+                    'artist_slug' => $page->artistSlug,
+                    'muzofond_track_count' => count($page->tracks),
+                    'duration_ms' => $artistDurationMs,
+                    'exception' => $exception->getMessage(),
+                ]);
             }
         }
 
         if ($dryRun) {
             $this->newLine();
-            $this->info('Dry-run завершён, данные не сохранялись.');
+            $this->info('Dry-run завершен, данные не сохранялись.');
 
             return self::SUCCESS;
         }

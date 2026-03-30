@@ -175,6 +175,25 @@ class GeniusNameMatcher
         return preg_replace('/^[\s\p{Pd}]+|[\s\p{Pd}]+$/u', '', $value) ?? trim($value);
     }
 
+    public static function albumStorageValue(string $value): string
+    {
+        $value = self::cleanTextValue($value);
+
+        if ($value === '') {
+            return '';
+        }
+
+        $value = strtr($value, [
+            '[' => '(',
+            ']' => ')',
+            '{' => '(',
+            '}' => ')',
+        ]);
+        $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
+
+        return preg_replace('/^[\s\p{Pd}]+|[\s\p{Pd}]+$/u', '', $value) ?? trim($value);
+    }
+
     public static function cleanDescriptionPreview(?string $value): ?string
     {
         $value = self::cleanTextValue((string) ($value ?? ''));
@@ -393,11 +412,15 @@ class GeniusNameMatcher
     public static function songSearchQueries(string $artistName, string $title, ?string $albumTitle = null): array
     {
         $artistVariants = self::artistSearchQueries($artistName);
+        $rawTitle = self::forceUtf8($title);
+        $storedTitle = self::storageValue($title);
         $title = self::normalizeStoredTrackTitle($title);
         $albumTitle = self::shouldUseAlbumInSongSearch($albumTitle)
             ? self::storageValue((string) $albumTitle)
             : '';
         $titleVariants = collect([
+            $rawTitle,
+            $storedTitle,
             $title,
             self::storageValue($title),
             self::transliterateCyrillic($title),
@@ -754,7 +777,17 @@ class GeniusNameMatcher
 
     private static function shouldUseAlbumInSongSearch(?string $albumTitle): bool
     {
-        $normalized = self::normalizeLoose((string) ($albumTitle ?? ''));
+        $storedAlbumTitle = self::storageValue((string) ($albumTitle ?? ''));
+
+        if ($storedAlbumTitle === '') {
+            return false;
+        }
+
+        $normalized = self::normalizeLoose($storedAlbumTitle);
+
+        if ($normalized === '') {
+            return preg_match('/[\p{L}\p{N}\p{S}]/u', $storedAlbumTitle) === 1;
+        }
 
         return $normalized !== '' && ! in_array($normalized, [
             'novinki',
@@ -770,6 +803,9 @@ class GeniusNameMatcher
     private static function normalizeCommonBrokenSymbols(string $value): string
     {
         return strtr($value, [
+            "\u{0432}\u{20AC}\u{0459}" => "\u{221A}",
+            "\u{0432}\u{02C6}\u{0161}" => "\u{221A}",
+            "\u{00E2}\u{02C6}\u{0161}" => "\u{221A}",
             'âˆš' => '√',
             '€љ' => '√',
             'â€“' => '-',
@@ -906,7 +942,7 @@ class GeniusNameMatcher
             return false;
         }
 
-        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|prod|cover)\b/iu', $normalized) === 1;
+        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|prod|cover|ring(?: ?tone)?|caller tune|na zvonok)\b/iu', $normalized) === 1;
     }
 
     private static function looksLikeMojibake(string $value): bool

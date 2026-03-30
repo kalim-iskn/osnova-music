@@ -57,4 +57,58 @@ class GeniusClientTest extends TestCase
                 && ($query['per_page'] ?? null) === '50';
         });
     }
+
+    public function test_album_track_numbers_prefers_album_tracks_api_and_skips_noisy_album_html(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        config()->set('services.genius.access_token', 'test-token');
+        config()->set('services.genius.songs_per_page', 50);
+        config()->set('services.genius.max_pages', 5);
+        Cache::flush();
+        Http::preventStrayRequests();
+
+        Http::fake([
+            'https://genius.test/api/albums/29/tracks*' => Http::response([
+                'response' => [
+                    'tracks' => [
+                        [
+                            'number' => 17,
+                            'song' => ['id' => 5070373, 'title' => 'Снег'],
+                        ],
+                        [
+                            'number' => 18,
+                            'song' => ['id' => 5889754, 'title' => 'Впадлу'],
+                        ],
+                    ],
+                    'next_page' => null,
+                ],
+            ]),
+        ]);
+
+        $numbers = (new GeniusClient())->albumTrackNumbers(29, 'https://genius.test/albums/29');
+
+        $this->assertSame([
+            5070373 => 17,
+            5889754 => 18,
+        ], $numbers);
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/albums/29/tracks'));
+    }
+
+    public function test_all_artist_songs_returns_empty_array_on_404_instead_of_throwing(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        config()->set('services.genius.access_token', 'test-token');
+        Cache::flush();
+
+        Http::fake([
+            'https://genius.test/api/artists/999/songs*' => Http::response([], 404),
+        ]);
+
+        $songs = (new GeniusClient())->allArtistSongs(999);
+
+        $this->assertSame([], $songs);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/artists/999/songs'));
+    }
 }

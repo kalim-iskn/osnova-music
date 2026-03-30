@@ -4,6 +4,10 @@ namespace App\Services\TrackParsing\DTO;
 
 final class ParsedTrack
 {
+    public const SOURCE_ARTIST_PAGE = 'artist_page';
+
+    public const SOURCE_ALBUM_PAGE = 'album_page';
+
     /**
      * @param  string[]  $artistNames
      * @param  string[]  $genres
@@ -17,6 +21,7 @@ final class ParsedTrack
         public array $artistNames = [],
         public ?int $releaseYear = null,
         public array $genres = [],
+        public string $sourceType = self::SOURCE_ARTIST_PAGE,
     ) {
     }
 }

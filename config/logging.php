@@ -15,7 +15,10 @@ return [
     'channels' => [
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => array_values(array_filter(array_map(
+                static fn (string $channel): string => trim($channel),
+                explode(',', (string) env('LOG_STACK', 'daily'))
+            ))),
             'ignore_exceptions' => false,
         ],
 
@@ -23,6 +26,14 @@ return [
             'driver' => 'single',
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
+            'replace_placeholders' => true,
+        ],
+
+        'daily' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/laravel.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => (int) env('LOG_DAILY_DAYS', 21),
             'replace_placeholders' => true,
         ],
 

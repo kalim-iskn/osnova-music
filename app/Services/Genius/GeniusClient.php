@@ -11,21 +11,21 @@ use RuntimeException;
 
 class GeniusClient
 {
-    private string $baseUrl;
+    private string $baseUrl = 'https://genius.com/api';
 
-    private int $timeout;
+    private int $timeout = 20;
 
-    private int $cacheTtl;
+    private int $cacheTtl = 86400;
 
-    private int $songsPerPage;
+    private int $songsPerPage = 50;
 
-    private int $albumsPerPage;
+    private int $albumsPerPage = 50;
 
-    private int $maxPages;
+    private int $maxPages = 100;
 
-    private ?string $accessToken;
+    private ?string $accessToken = null;
 
-    private string $cacheVersion;
+    private string $cacheVersion = '20260330-1';
 
     public function __construct()
     {
@@ -36,7 +36,7 @@ class GeniusClient
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
-        $this->cacheVersion = (string) config('services.genius.cache_version', '20260328-3');
+        $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-1');
     }
 
     /**
@@ -109,7 +109,7 @@ class GeniusClient
      */
     public function song(int $geniusId): ?array
     {
-        $payload = $this->get('songs/' . $geniusId, [], 'song:' . $geniusId);
+        $payload = $this->get('songs/' . $geniusId, [], 'song:' . $geniusId, allowFailure: true);
 
         return Arr::get($payload, 'response.song');
     }
@@ -119,7 +119,7 @@ class GeniusClient
      */
     public function album(int $geniusId): ?array
     {
-        $payload = $this->get('albums/' . $geniusId, [], 'album:' . $geniusId);
+        $payload = $this->get('albums/' . $geniusId, [], 'album:' . $geniusId, allowFailure: true);
 
         return Arr::get($payload, 'response.album');
     }
@@ -171,6 +171,29 @@ class GeniusClient
     public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
     {
         return Cache::remember($this->cacheKey('album-track-numbers:' . $albumId), $this->cacheTtl, function () use ($albumId, $albumUrl): array {
+            $apiTracks = $this->albumTracks($albumId);
+            $apiMap = [];
+
+            foreach ($apiTracks as $track) {
+                if (! is_array($track)) {
+                    continue;
+                }
+
+                $song = is_array($track['song'] ?? null) ? $track['song'] : $track;
+                $songId = (int) ($song['id'] ?? 0);
+                $trackNumber = (int) ($track['number'] ?? $track['track_number'] ?? $song['track_number'] ?? $song['number'] ?? 0);
+
+                if ($songId <= 0 || $trackNumber <= 0 || isset($apiMap[$songId])) {
+                    continue;
+                }
+
+                $apiMap[$songId] = $trackNumber;
+            }
+
+            if ($apiMap !== []) {
+                return $apiMap;
+            }
+
             $albumPayload = $albumUrl ? null : $this->album($albumId);
             $albumUrl ??= is_array($albumPayload) ? (string) ($albumPayload['url'] ?? '') : '';
 
@@ -200,7 +223,7 @@ class GeniusClient
                 'page' => $page,
                 'per_page' => $this->songsPerPage,
                 'include_features' => true,
-            ], 'artist-songs:' . $artistId . ':' . $page . ':per:' . $this->songsPerPage . ':features:1');
+            ], 'artist-songs:' . $artistId . ':' . $page . ':per:' . $this->songsPerPage . ':features:1', allowFailure: true);
 
             $items = collect((array) Arr::get($payload, 'response.songs', []))
                 ->filter(fn ($song) => is_array($song))

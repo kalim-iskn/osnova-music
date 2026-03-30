@@ -78,7 +78,7 @@ const currentArtists = computed(() => {
 
         return {
             ...artist,
-            image_url: artist.image_url ?? props.track.cover_image_url,
+            image_url: runtimeArtist?.image_url ?? artist.image_url ?? null,
             social_links: runtimeArtist?.social_links ?? {},
             genius_url: runtimeArtist?.url ?? null,
         };
@@ -191,14 +191,14 @@ onMounted(fetchRuntime);
                 >
                     <Link v-if="artist.slug" :href="`/artists/${artist.slug}`" class="track-page__artist-avatar-link">
                         <img
-                            :src="artist.image_url ?? track.cover_image_url"
+                            :src="artist.image_url ?? '/artist-placeholder.svg'"
                             :alt="artist.name"
                             class="track-page__artist-avatar"
                         >
                     </Link>
                     <img
                         v-else
-                        :src="artist.image_url ?? track.cover_image_url"
+                        :src="artist.image_url ?? '/artist-placeholder.svg'"
                         :alt="artist.name"
                         class="track-page__artist-avatar"
                     >
