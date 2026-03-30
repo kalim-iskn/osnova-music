@@ -93,6 +93,109 @@ class GeniusCatalogSyncService
     ) {
     }
 
+
+    public function setNeedDebug(bool $debugMatchingEnabled): void
+    {
+        $this->debugMatchingEnabled = $debugMatchingEnabled;
+    }
+
+    private function debugMatchingEnabled(): bool
+    {
+        return $this->debugMatchingEnabled || (bool) config('services.genius.debug_matching', false);
+    }
+
+    private function matchingLog(string $level, string $message, array $context = []): void
+    {
+        if ($level === 'debug' && ! $this->debugMatchingEnabled()) {
+            return;
+        }
+
+        Log::channel((string) config('services.genius.log_channel', 'genius_matching'))
+            ->log($level, $message, $context);
+    }
+
+    /**
+     * @param  ParsedTrack[]  $tracks
+     * @return ParsedTrack[]
+     */
+    private function sortParsedTracksForMatching(array $tracks): array
+    {
+        usort($tracks, function (ParsedTrack $left, ParsedTrack $right): int {
+            $leftSourcePriority = $left->sourceType === ParsedTrack::SOURCE_ALBUM_PAGE ? 0 : 1;
+            $rightSourcePriority = $right->sourceType === ParsedTrack::SOURCE_ALBUM_PAGE ? 0 : 1;
+
+            if ($leftSourcePriority !== $rightSourcePriority) {
+                return $leftSourcePriority <=> $rightSourcePriority;
+            }
+
+            $leftAlbumPriority = $this->shouldPersistAlbumTitle($left->albumTitle) ? 0 : 1;
+            $rightAlbumPriority = $this->shouldPersistAlbumTitle($right->albumTitle) ? 0 : 1;
+
+            if ($leftAlbumPriority !== $rightAlbumPriority) {
+                return $leftAlbumPriority <=> $rightAlbumPriority;
+            }
+
+            return ((int) ($left->trackNumber ?? 999)) <=> ((int) ($right->trackNumber ?? 999));
+        });
+
+        return array_values($tracks);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $albumSummaries
+     * @return array<int, array<string, mixed>>
+     */
+    private function preloadRelevantAlbumTrackSummaries(ParsedArtistPage $page, array $albumSummaries): array
+    {
+        if ($albumSummaries === []) {
+            return [];
+        }
+
+        $summaries = [];
+        $seenAlbumIds = [];
+
+        foreach ($this->sortParsedTracksForMatching($page->tracks) as $parsedTrack) {
+            if (! $this->shouldPersistAlbumTitle($parsedTrack->albumTitle)) {
+                continue;
+            }
+
+            $albumCandidates = $this->buildAlbumTrackFallbackCandidates($parsedTrack, $albumSummaries);
+
+            if ($albumCandidates === []) {
+                continue;
+            }
+
+            $inspectionLimit = min(
+                12,
+                max(6, $this->albumTrackFallbackInspectionLimit($albumCandidates) + 2)
+            );
+
+            foreach (array_slice($albumCandidates, 0, $inspectionLimit) as $albumCandidate) {
+                $albumPayload = is_array($albumCandidate['album'] ?? null) ? $albumCandidate['album'] : [];
+                $albumId = (int) ($albumPayload['id'] ?? 0);
+
+                if ($albumId <= 0 || isset($seenAlbumIds[$albumId])) {
+                    continue;
+                }
+
+                $seenAlbumIds[$albumId] = true;
+                $songs = $this->albumTrackSongs($albumId, $albumPayload);
+
+                if ($songs !== []) {
+                    $summaries = $this->mergeSongSummaries($summaries, $songs);
+                }
+            }
+        }
+
+        $this->matchingLog('debug', 'Genius album-track summaries preloaded.', [
+            'artist' => $page->artistName,
+            'matched_album_count' => count($seenAlbumIds),
+            'preloaded_song_summary_count' => count($summaries),
+        ]);
+
+        return $summaries;
+    }
+
     /**
      * @return array{artist:Artist, artists:int, albums:int, tracks:int, matched_tracks:int, unmatched_tracks:int, genius_matched:bool}
      */
@@ -149,16 +252,17 @@ class GeniusCatalogSyncService
         $artistsCreated += $artistWasCreatedFromGenius ? 1 : 0;
         $this->primeAlbumPageAlbumContext($artist, $page);
         $deferredAlbumPageTracks = [];
+        $orderedParsedTracks = $this->sortParsedTracksForMatching($page->tracks);
 
-        $needsAlbumCatalog = collect($page->tracks)
-            ->contains(fn (ParsedTrack $parsedTrack) => $this->shouldPersistAlbumTitle($parsedTrack->albumTitle));
-
-        $albumSummaries = $needsAlbumCatalog
-            ? collect($this->geniusClient->allArtistAlbums((int) $geniusArtist['id']))
-                ->filter(fn ($album) => is_array($album))
-                ->values()
-                ->all()
-            : [];
+        /**
+         * Build a complete in-memory Genius artist catalog up-front:
+         * all artist albums + all artist songs, then enrich it with relevant album-track pages
+         * for album-page Muzofond rows before the first matching pass.
+         */
+        $albumSummaries = collect($this->geniusClient->allArtistAlbums((int) $geniusArtist['id']))
+            ->filter(fn ($album) => is_array($album))
+            ->values()
+            ->all();
         $this->currentArtistAlbumSummaries = $albumSummaries;
 
         $songSummaries = collect($this->geniusClient->allArtistSongs((int) $geniusArtist['id']))
@@ -169,9 +273,24 @@ class GeniusCatalogSyncService
             })
             ->values()
             ->all();
+
+        $preloadedAlbumTrackSummaries = $this->preloadRelevantAlbumTrackSummaries($page, $albumSummaries);
+
+        if ($preloadedAlbumTrackSummaries !== []) {
+            $songSummaries = $this->mergeSongSummaries($songSummaries, $preloadedAlbumTrackSummaries);
+        }
+
         $this->primeSongSummaryIndexes($songSummaries);
 
-        foreach ($page->tracks as $parsedTrack) {
+        $this->matchingLog('debug', 'Genius artist catalog primed for sync.', [
+            'artist' => $page->artistName,
+            'genius_artist_id' => (int) ($geniusArtist['id'] ?? 0),
+            'album_count' => count($albumSummaries),
+            'song_summary_count' => count($songSummaries),
+            'preloaded_album_track_summary_count' => count($preloadedAlbumTrackSummaries),
+        ]);
+
+        foreach ($orderedParsedTracks as $parsedTrack) {
             try {
                 $matchedSong = $this->findBestSongMatch(
                     $page,
@@ -214,7 +333,7 @@ class GeniusCatalogSyncService
             } catch (Throwable $exception) {
                 $unmatchedTracks++;
 
-                Log::warning('Genius sync skipped one track because of an exception.', [
+                $this->matchingLog('warning', 'Genius sync skipped one track because of an exception.', [
                     'artist' => $page->artistName,
                     'muzofond_track_title' => GeniusNameMatcher::forceUtf8($parsedTrack->title),
                     'exception' => $exception->getMessage(),
@@ -260,7 +379,7 @@ class GeniusCatalogSyncService
                     $unmatchedTracks = max(0, $unmatchedTracks - 1);
                     $tracksCreated += $trackCreated ? 1 : 0;
                 } catch (Throwable $exception) {
-                    Log::warning('Genius sync retry skipped one deferred album-page track because of an exception.', [
+                    $this->matchingLog('warning', 'Genius sync retry skipped one deferred album-page track because of an exception.', [
                         'artist' => $page->artistName,
                         'muzofond_track_title' => GeniusNameMatcher::forceUtf8($parsedTrack->title),
                         'exception' => $exception->getMessage(),
@@ -537,10 +656,10 @@ class GeniusCatalogSyncService
     private function searchQueryAttemptLimit(ParsedTrack $parsedTrack): int
     {
         if ($this->shouldPersistAlbumTitle($parsedTrack->albumTitle)) {
-            return $this->versionFlags($parsedTrack->title) === [] ? 6 : 8;
+            return $this->versionFlags($parsedTrack->title) === [] ? 8 : 10;
         }
 
-        return $this->versionFlags($parsedTrack->title) === [] ? 4 : 6;
+        return $this->versionFlags($parsedTrack->title) === [] ? 6 : 8;
     }
 
     /**
@@ -656,7 +775,7 @@ class GeniusCatalogSyncService
 
             $albumTrackSongs = $this->mergeSongSummaries($albumTrackSongs, $songs);
 
-            if (count($albumTrackSongs) >= 18) {
+            if (count($albumTrackSongs) >= 60) {
                 break;
             }
         }
@@ -798,7 +917,7 @@ class GeniusCatalogSyncService
             })
             ->count();
 
-        return max(3, min(8, max(5, $strongCandidates)));
+        return max(6, min(12, max(8, $strongCandidates + 1)));
     }
 
     private function parsedTrackPrefersOriginalAlbum(ParsedTrack $parsedTrack): bool
@@ -896,7 +1015,7 @@ class GeniusCatalogSyncService
         try {
             $tracks = $this->geniusClient->albumTracks($albumId);
         } catch (Throwable $exception) {
-            Log::warning('Genius album tracks lookup failed, cached as empty for this sync.', [
+            $this->matchingLog('warning', 'Genius album tracks lookup failed, cached as empty for this sync.', [
                 'album_id' => $albumId,
                 'exception' => $exception->getMessage(),
             ]);
@@ -1262,7 +1381,7 @@ class GeniusCatalogSyncService
             } catch (Throwable $exception) {
                 $this->songDetails[$songId] = null;
 
-                Log::warning('Genius song detail lookup failed, cached as null for this sync.', [
+                $this->matchingLog('warning', 'Genius song detail lookup failed, cached as null for this sync.', [
                     'song_id' => $songId,
                     'exception' => $exception->getMessage(),
                 ]);
@@ -1557,7 +1676,7 @@ class GeniusCatalogSyncService
             return;
         }
 
-        Log::debug('Genius song match diagnostics.', [
+        $this->matchingLog('debug', 'Genius song match diagnostics.', [
             'source' => $source,
             'artist' => $page->artistName,
             'parsed_track' => [
@@ -1602,7 +1721,7 @@ class GeniusCatalogSyncService
             return;
         }
 
-        Log::debug('Genius album-track fallback diagnostics.', [
+        $this->matchingLog('debug', 'Genius album-track fallback diagnostics.', [
             'artist' => $page->artistName,
             'parsed_track' => [
                 'title' => $parsedTrack->title,
@@ -4531,13 +4650,4 @@ class GeniusCatalogSyncService
         return in_array($column, $this->trackColumns, true);
     }
 
-    private function debugMatchingEnabled(): bool
-    {
-        return $this->debugMatchingEnabled;
-    }
-
-    public function setNeedDebug(bool $debugMatchingEnabled): void
-    {
-        $this->debugMatchingEnabled = $debugMatchingEnabled;
-    }
 }

@@ -176,16 +176,22 @@ class MuzofondTrackParser
         }
 
         $artistTracks = $this->uniqueTracksByAudioUrl($artistTracks);
+
+        /**
+         * uniqueTracksByAudioUrl() already prefers album-page tracks when identities collide,
+         * so the album pass keeps priority while we still merge in the remaining artist-page rows.
+         */
         $tracks = $this->uniqueTracksByAudioUrl(array_merge($albumTracks, $artistTracks));
 
         if ($this->debugParsingEnabled()) {
-            Log::debug('Muzofond artist parsing summary.', [
+            $this->parsingLog('debug', 'Muzofond artist parsing summary.', [
                 'artist' => $artistName,
                 'artist_page_count' => count($orderedArtistPages),
                 'recommended_album_count' => count($albumLinks),
                 'album_track_count' => count($albumTracks),
                 'artist_only_track_count' => count($artistTracks),
                 'merged_track_count' => count($tracks),
+                'dedupe_strategy' => 'artist-title-primary_album-priority',
             ]);
         }
 
@@ -557,7 +563,7 @@ class MuzofondTrackParser
     {
         if (! $this->albumPageBelongsToArtist($html, $pageArtistName)) {
             if ($this->debugParsingEnabled()) {
-                Log::debug('Muzofond album page skipped because it belongs to another artist.', [
+                $this->parsingLog('debug', 'Muzofond album page skipped because it belongs to another artist.', [
                     'artist' => $pageArtistName,
                 ]);
             }
@@ -569,7 +575,7 @@ class MuzofondTrackParser
         $tracks = $this->extractTrackListItems($html, $pageArtistName, $albumTitle, [], [], false, ParsedTrack::SOURCE_ALBUM_PAGE);
 
         if ($this->debugParsingEnabled()) {
-            Log::debug('Muzofond album page parsed.', [
+            $this->parsingLog('debug', 'Muzofond album page parsed.', [
                 'artist' => $pageArtistName,
                 'album' => $albumTitle,
                 'track_count' => count($tracks),
@@ -925,15 +931,26 @@ class MuzofondTrackParser
             ->values()
             ->implode('|');
 
-        if ($title === '' || $artistKey === '' || $track->durationSeconds <= 0) {
+        if ($title === '' || $artistKey === '') {
             return [];
         }
 
-        $keys = [$artistKey . '|' . $title . '|' . $track->durationSeconds];
+        $keys = [
+            $artistKey . '|' . $title,
+        ];
+
+        if ($track->durationSeconds > 0) {
+            $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds;
+        }
+
         $albumTitle = Str::lower($this->normalizeText((string) ($track->albumTitle ?? '')));
 
         if ($albumTitle !== '') {
-            $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds . '|' . $albumTitle;
+            $keys[] = $artistKey . '|' . $title . '|' . $albumTitle;
+
+            if ($track->durationSeconds > 0) {
+                $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds . '|' . $albumTitle;
+            }
         }
 
         return array_values(array_unique($keys));
@@ -1134,7 +1151,7 @@ class MuzofondTrackParser
                         && $normalizedAlbumTitle !== ''
                         && $normalizedAlbumTitle === $normalizedBaseTitle) {
                         if ($this->debugParsingEnabled()) {
-                            Log::debug('Muzofond metadata block repeated the track title, album was suppressed.', [
+                            $this->parsingLog('debug', 'Muzofond metadata block repeated the track title, album was suppressed.', [
                                 'raw_track_title' => $rawTrackTitle,
                                 'normalized_title' => $baseTitle,
                                 'meta_block' => $meta,
@@ -1489,7 +1506,7 @@ class MuzofondTrackParser
                     }
 
                     if ($this->debugParsingEnabled()) {
-                        Log::warning('Muzofond batch fetch returned no response.', [
+                        $this->parsingLog('warning', 'Muzofond batch fetch returned no response.', [
                             'url' => $url,
                         ]);
                     }
@@ -1505,7 +1522,7 @@ class MuzofondTrackParser
                     }
 
                     if ($this->debugParsingEnabled()) {
-                        Log::warning('Muzofond batch fetch skipped one URL.', [
+                        $this->parsingLog('warning', 'Muzofond batch fetch skipped one URL.', [
                             'url' => $url,
                             'error' => $exception->getMessage(),
                         ]);
@@ -1721,11 +1738,17 @@ class MuzofondTrackParser
 
     private function debugParsingEnabled(): bool
     {
-        return $this->debugParsingEnabled;
+        return $this->debugParsingEnabled || (bool) config('services.muzofond.debug_parsing', false);
     }
 
     public function setNeedDebug(bool $debugParsingEnabled): void
     {
         $this->debugParsingEnabled = $debugParsingEnabled;
+    }
+
+    private function parsingLog(string $level, string $message, array $context = []): void
+    {
+        Log::channel((string) config('services.muzofond.log_channel', 'muzofond'))
+            ->log($level, $message, $context);
     }
 }

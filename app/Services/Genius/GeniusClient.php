@@ -7,6 +7,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class GeniusClient
@@ -25,7 +26,13 @@ class GeniusClient
 
     private ?string $accessToken = null;
 
-    private string $cacheVersion = '20260330-3';
+    private string $cacheVersion = '20260330-4';
+
+    private int $retryTimes = 4;
+
+    private int $retrySleepMs = 1500;
+
+    private string $logChannel = 'genius_matching';
 
     /**
      * @var array<string, array<string, mixed>>
@@ -46,7 +53,10 @@ class GeniusClient
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
-        $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-3');
+        $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-4');
+        $this->retryTimes = max(1, (int) config('services.genius.retry_times', 4));
+        $this->retrySleepMs = max(250, (int) config('services.genius.retry_sleep_ms', 1500));
+        $this->logChannel = (string) config('services.genius.log_channel', 'genius_matching');
     }
 
     /**
@@ -307,6 +317,11 @@ class GeniusClient
             ?? null;
     }
 
+    private function httpLog(string $level, string $message, array $context = []): void
+    {
+        Log::channel($this->logChannel)->log($level, $message, $context);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -331,6 +346,14 @@ class GeniusClient
             }
 
             if (! $response->successful()) {
+                $this->httpLog('warning', 'Genius API request failed.', [
+                    'path' => $path,
+                    'query' => $query,
+                    'status' => $response->status(),
+                    'allow_failure' => $allowFailure,
+                    'body_preview' => mb_substr((string) $response->body(), 0, 500),
+                ]);
+
                 throw new RuntimeException(sprintf(
                     'Genius API вернул %d для %s',
                     $response->status(),
@@ -347,7 +370,7 @@ class GeniusClient
     private function requestHtml(string $url): ?string
     {
         $response = Http::timeout($this->timeout)
-            ->retry(2, 700, throw: false)
+            ->retry($this->retryTimes, $this->retrySleepMs, throw: false)
             ->withHeaders([
                 'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -359,6 +382,12 @@ class GeniusClient
             ->get($url);
 
         if (! $response->successful()) {
+            $this->httpLog('warning', 'Genius HTML request failed.', [
+                'url' => $url,
+                'status' => $response->status(),
+                'body_preview' => mb_substr((string) $response->body(), 0, 500),
+            ]);
+
             return null;
         }
 
@@ -432,7 +461,7 @@ class GeniusClient
     {
         $request = Http::acceptJson()
             ->timeout($this->timeout)
-            ->retry(2, 700, throw: false)
+            ->retry($this->retryTimes, $this->retrySleepMs, throw: false)
             ->withHeaders([
                 'User-Agent' => 'WaveFlow Genius Sync/1.0',
                 'Accept-Language' => 'ru,en;q=0.9',

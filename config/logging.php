@@ -37,6 +37,22 @@ return [
             'replace_placeholders' => true,
         ],
 
+        'muzofond' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/muzofond.log'),
+            'level' => env('MUZOFOND_LOG_LEVEL', 'debug'),
+            'days' => (int) env('LOG_DAILY_DAYS', 21),
+            'replace_placeholders' => true,
+        ],
+
+        'genius_matching' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/genius-matching.log'),
+            'level' => env('GENIUS_LOG_LEVEL', 'debug'),
+            'days' => (int) env('LOG_DAILY_DAYS', 21),
+            'replace_placeholders' => true,
+        ],
+
         'stderr' => [
             'driver' => 'monolog',
             'level' => env('LOG_LEVEL', 'debug'),
