@@ -62,6 +62,13 @@ class Track extends Model
         return $this->belongsTo(Album::class);
     }
 
+    public function albums(): BelongsToMany
+    {
+        return $this->belongsToMany(Album::class, 'album_track')
+            ->withPivot('is_primary')
+            ->withTimestamps();
+    }
+
     public function artists(): BelongsToMany
     {
         return $this->belongsToMany(Artist::class, 'artist_track')->withTimestamps();

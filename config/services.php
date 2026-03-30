@@ -6,7 +6,7 @@ return [
         'access_token' => env('GENIUS_ACCESS_TOKEN'),
         'timeout' => (int) env('GENIUS_TIMEOUT', 20),
         'cache_ttl' => (int) env('GENIUS_CACHE_TTL', 86400),
-        'cache_version' => env('GENIUS_CACHE_VERSION', '20260330-6'),
+        'cache_version' => env('GENIUS_CACHE_VERSION', '20260330-7'),
         'debug_matching' => (bool) env('GENIUS_DEBUG_MATCHING', false),
         'log_channel' => env('GENIUS_LOG_CHANNEL', 'genius_matching'),
         'retry_times' => (int) env('GENIUS_RETRY_TIMES', 4),

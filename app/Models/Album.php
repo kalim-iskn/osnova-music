@@ -37,7 +37,17 @@ class Album extends Model
         return $this->belongsTo(Artist::class);
     }
 
-    public function tracks(): HasMany
+    public function tracks(): BelongsToMany
+    {
+        return $this->belongsToMany(Track::class, 'album_track')
+            ->withPivot('is_primary')
+            ->withTimestamps()
+            ->orderByPivotDesc('is_primary')
+            ->orderBy('track_number')
+            ->orderBy('tracks.id');
+    }
+
+    public function primaryTracks(): HasMany
     {
         return $this->hasMany(Track::class);
     }

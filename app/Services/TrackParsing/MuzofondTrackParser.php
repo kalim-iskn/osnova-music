@@ -935,25 +935,9 @@ class MuzofondTrackParser
             return [];
         }
 
-        $keys = [
+        return [
             $artistKey . '|' . $title,
         ];
-
-        if ($track->durationSeconds > 0) {
-            $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds;
-        }
-
-        $albumTitle = Str::lower($this->normalizeText((string) ($track->albumTitle ?? '')));
-
-        if ($albumTitle !== '') {
-            $keys[] = $artistKey . '|' . $title . '|' . $albumTitle;
-
-            if ($track->durationSeconds > 0) {
-                $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds . '|' . $albumTitle;
-            }
-        }
-
-        return array_values(array_unique($keys));
     }
 
     /**
