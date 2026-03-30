@@ -25,7 +25,17 @@ class GeniusClient
 
     private ?string $accessToken = null;
 
-    private string $cacheVersion = '20260330-1';
+    private string $cacheVersion = '20260330-3';
+
+    /**
+     * @var array<string, array<string, mixed>>
+     */
+    private array $runtimeCache = [];
+
+    /**
+     * @var array<string, array<int, int>>
+     */
+    private array $runtimeAlbumTrackNumbersCache = [];
 
     public function __construct()
     {
@@ -36,7 +46,7 @@ class GeniusClient
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
-        $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-1');
+        $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-3');
     }
 
     /**
@@ -170,7 +180,13 @@ class GeniusClient
      */
     public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
     {
-        return Cache::remember($this->cacheKey('album-track-numbers:' . $albumId), $this->cacheTtl, function () use ($albumId, $albumUrl): array {
+        $runtimeCacheKey = $albumId . '|' . (string) ($albumUrl ?? '');
+
+        if (array_key_exists($runtimeCacheKey, $this->runtimeAlbumTrackNumbersCache)) {
+            return $this->runtimeAlbumTrackNumbersCache[$runtimeCacheKey];
+        }
+
+        $trackNumbers = Cache::remember($this->cacheKey('album-track-numbers:' . $albumId), $this->cacheTtl, function () use ($albumId, $albumUrl): array {
             $apiTracks = $this->albumTracks($albumId);
             $apiMap = [];
 
@@ -209,6 +225,8 @@ class GeniusClient
 
             return $this->extractTrackNumbersFromAlbumHtml($html);
         });
+
+        return $this->runtimeAlbumTrackNumbersCache[$runtimeCacheKey] = $trackNumbers;
     }
 
     /**
@@ -296,11 +314,15 @@ class GeniusClient
     {
         $cacheKey = $this->cacheKey($cacheKey ?? md5($path . ':' . json_encode($query)));
 
+        if (array_key_exists($cacheKey, $this->runtimeCache)) {
+            return $this->runtimeCache[$cacheKey];
+        }
+
         File::ensureDirectoryExists(storage_path('framework'));
         File::ensureDirectoryExists(storage_path('framework/cache'));
         File::ensureDirectoryExists(storage_path('framework/cache/data'));
 
-        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($path, $query, $allowFailure): array {
+        return $this->runtimeCache[$cacheKey] = Cache::remember($cacheKey, $this->cacheTtl, function () use ($path, $query, $allowFailure): array {
             $response = $this->request()
                 ->get($this->baseUrl . '/' . ltrim($path, '/'), $query);
 

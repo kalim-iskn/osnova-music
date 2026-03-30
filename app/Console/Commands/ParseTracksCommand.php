@@ -35,11 +35,11 @@ class ParseTracksCommand extends Command
         $debugParsing = (bool) $this->option('debug-parsing');
 
         if ($debugMatching) {
-            config()->set('services.genius.debug_matching', true);
+            $geniusCatalogSyncService->setNeedDebug(true);
         }
 
         if ($debugParsing) {
-            config()->set('services.muzofond.debug_parsing', true);
+            $muzofondParser->setNeedDebug(true);
         }
 
         if (! filter_var($url, FILTER_VALIDATE_URL)) {

@@ -42,6 +42,19 @@ class MuzofondTrackParserTest extends TestCase
         $this->assertSame(2021, $track->releaseYear);
     }
 
+    public function test_extract_tracks_from_album_page_keeps_parenthesized_word_suffix_in_title(): void
+    {
+        $tracks = $this->extractAlbumTracks($this->albumPageHtml('Mayot - РћР±Р°', [
+            $this->trackRowHtml('21', '134', 'https://files.test/drugoy.mp3', 'Mayot', 'Р”СЂСѓРі(РѕР№)'),
+        ]), 'Mayot');
+        $track = $tracks[0] ?? null;
+
+        $this->assertNotNull($track);
+        $this->assertSame('Р”СЂСѓРі(РѕР№)', $track->title);
+        $this->assertSame('РћР±Р°', $track->albumTitle);
+        $this->assertSame(1, $track->trackNumber);
+    }
+
     public function test_parse_artist_page_collects_recommended_album_tracks_first_and_skips_duplicate_audio_urls(): void
     {
         Http::fake([
@@ -129,6 +142,48 @@ HTML),
         Http::assertSentCount(2);
     }
 
+    public function test_parse_artist_page_prefers_album_page_track_when_artist_page_contains_same_song_with_another_audio_url(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://muzofond.fm/collections/artists/mayot' => Http::response(
+                $this->artistPageHtml([
+                    $this->trackRowHtml('1', '186', 'https://files.test/artist-snow.mp3', 'Mayot', 'РЎРЅРµРі'),
+                    $this->trackRowHtml('2', '200', 'https://files.test/artist-only.mp3', 'Mayot', 'Р›РµС‚Рѕ'),
+                ], false, <<<HTML
+<h3>Р РµРєРѕРјРµРЅРґСѓРµРјС‹Рµ Р°Р»СЊР±РѕРјС‹</h3>
+<div class="swiper">
+    <div class="swiper-wrapper">
+        <div class="swiper-slide">
+            <a href="https://muzofond.fm/collections/albums/mayot%20ghetto%20garden">
+                <span class="title">Mayot - Ghetto Garden</span>
+            </a>
+        </div>
+    </div>
+</div>
+HTML),
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8']
+            ),
+            'https://muzofond.fm/collections/albums/mayot%20ghetto%20garden' => Http::response(
+                $this->albumPageHtml('Mayot - Ghetto Garden', [
+                    $this->trackRowHtml('11', '186', 'https://files.test/album-snow.mp3', 'Mayot', 'РЎРЅРµРі'),
+                ]),
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8']
+            ),
+        ]);
+
+        $pages = app(MuzofondTrackParser::class)->parse('https://muzofond.fm/collections/artists/mayot');
+        $page = $pages[0] ?? null;
+
+        $this->assertNotNull($page);
+        $this->assertCount(2, $page->tracks);
+        $this->assertSame('https://files.test/album-snow.mp3', $page->tracks[0]->audioUrl);
+        $this->assertSame('Ghetto Garden', $page->tracks[0]->albumTitle);
+        $this->assertSame('https://files.test/artist-only.mp3', $page->tracks[1]->audioUrl);
+    }
+
     /**
      * @return array<int, object>
      */
@@ -137,6 +192,22 @@ HTML),
         $parser = app(MuzofondTrackParser::class);
         $reflection = new ReflectionClass($parser);
         $method = $reflection->getMethod('extractTracksFromArtistPage');
+        $method->setAccessible(true);
+
+        /** @var array<int, object> $tracks */
+        $tracks = $method->invoke($parser, $html, $pageArtistName);
+
+        return $tracks;
+    }
+
+    /**
+     * @return array<int, object>
+     */
+    private function extractAlbumTracks(string $html, string $pageArtistName): array
+    {
+        $parser = app(MuzofondTrackParser::class);
+        $reflection = new ReflectionClass($parser);
+        $method = $reflection->getMethod('extractTracksFromAlbumPage');
         $method->setAccessible(true);
 
         /** @var array<int, object> $tracks */

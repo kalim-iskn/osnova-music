@@ -189,6 +189,22 @@ class GeniusNameMatcher
             '{' => '(',
             '}' => ')',
         ]);
+
+        while (preg_match('/^(?P<base>.+?)\s*[\(\[\{](?P<meta>[^()\[\]{}]+)[\)\]\}]\s*$/u', $value, $matches) === 1) {
+            $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
+            $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
+
+            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)) {
+                break;
+            }
+
+            if (! self::looksLikeAlbumTranslationSuffix($base, $meta)) {
+                break;
+            }
+
+            $value = $base;
+        }
+
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
 
         return preg_replace('/^[\s\p{Pd}]+|[\s\p{Pd}]+$/u', '', $value) ?? trim($value);
@@ -932,6 +948,15 @@ class GeniusNameMatcher
         }
 
         return ! $metaHasCyrillic && $metaHasLetters && preg_match("/^[\\p{Latin}\\d\\s\\-'\"“”„`&.,:;!?+]+$/u", $meta) === 1;
+    }
+
+    private static function looksLikeAlbumTranslationSuffix(string $base, string $meta): bool
+    {
+        if (! self::looksLikeTranslationSuffix($base, $meta)) {
+            return false;
+        }
+
+        return preg_match('/[\p{L}\p{N}]/u', $base) === 1;
     }
 
     private static function isVersionDescriptor(string $value): bool

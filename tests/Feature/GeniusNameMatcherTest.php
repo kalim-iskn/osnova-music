@@ -36,4 +36,9 @@ class GeniusNameMatcherTest extends TestCase
     {
         $this->assertSame('√ (Racine carree)', GeniusNameMatcher::albumStorageValue('в€љ (Racine carree)'));
     }
+    public function test_album_storage_value_removes_english_translation_suffixes(): void
+    {
+        $this->assertSame('БОГ РЭПА', GeniusNameMatcher::albumStorageValue('БОГ РЭПА (RAPGOD)'));
+        $this->assertSame('ПРОКЛЯТАЯ ПЕЧАТЬ', GeniusNameMatcher::albumStorageValue('ПРОКЛЯТАЯ ПЕЧАТЬ (CURSED SEAL)'));
+    }
 }

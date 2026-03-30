@@ -14,8 +14,10 @@ use RuntimeException;
 
 class MuzofondTrackParser
 {
+    private bool $debugParsingEnabled = false;
+
     private const BASE_URL = 'https://muzofond.fm';
-    private const HTTP_BATCH_SIZE = 10;
+    private const HTTP_BATCH_SIZE = 20;
 
     /**
      * @var array<string, string>
@@ -159,12 +161,17 @@ class MuzofondTrackParser
             ->filter()
             ->values()
             ->all();
+        $albumTrackDedupKeys = collect($albumTracks)
+            ->flatMap(fn (ParsedTrack $track) => $this->parsedTrackDeduplicationKeys($track))
+            ->filter()
+            ->values()
+            ->all();
         $artistTracks = [];
 
         foreach ($orderedArtistPages as $html) {
             $artistTracks = array_merge(
                 $artistTracks,
-                $this->extractTracksFromArtistPage($html, $artistName, null, $albumTrackAudioUrls)
+                $this->extractTracksFromArtistPage($html, $artistName, null, $albumTrackAudioUrls, $albumTrackDedupKeys)
             );
         }
 
@@ -332,6 +339,35 @@ class MuzofondTrackParser
     {
         $xpath = $this->makeXPath($html);
         $links = [];
+        $headingLinks = $this->extractRecommendedAlbumLinksFromHeadings($xpath, $pageArtistName);
+
+        if ($headingLinks !== []) {
+            return $headingLinks;
+        }
+
+        $swiperLinks = [];
+        $swiperNodes = $xpath->query("//div[contains(concat(' ', normalize-space(@class), ' '), ' swiper ')]//a[@href]");
+
+        foreach ($swiperNodes ?: [] as $node) {
+            if (! $node instanceof \DOMElement) {
+                continue;
+            }
+
+            if (! $this->albumListingBelongsToArtist($xpath, $node, $pageArtistName)) {
+                continue;
+            }
+
+            $normalized = $this->normalizeAlbumListingHref((string) $node->getAttribute('href'));
+
+            if ($normalized !== null && ! in_array($normalized, $swiperLinks, true)) {
+                $swiperLinks[] = $normalized;
+            }
+        }
+
+        if ($swiperLinks !== []) {
+            return $swiperLinks;
+        }
+
         $queries = [
             "//*[self::h2 or self::h3 or self::h4][contains(normalize-space(.), 'Рекомендуемые альбомы')]/following-sibling::*[1]//a[@href]",
             "//*[self::h2 or self::h3 or self::h4][contains(normalize-space(.), 'Рекомендуемые альбомы')]/following::*[contains(concat(' ', normalize-space(@class), ' '), ' swiper ')][1]//a[@href]",
@@ -387,6 +423,71 @@ class MuzofondTrackParser
         }
 
         return $links;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function extractRecommendedAlbumLinksFromHeadings(\DOMXPath $xpath, string $pageArtistName): array
+    {
+        $links = [];
+        $headingNodes = $xpath->query('//h2|//h3|//h4');
+
+        foreach ($headingNodes ?: [] as $headingNode) {
+            if (! $headingNode instanceof \DOMElement || ! $this->isAlbumSectionHeading($headingNode->textContent ?? '')) {
+                continue;
+            }
+
+            $container = $this->firstNodeFromContext($xpath, $headingNode, [
+                'following-sibling::*[contains(concat(" ", normalize-space(@class), " "), " swiper ")][1]',
+                'following-sibling::*[1]',
+            ]);
+
+            if (! $container instanceof \DOMElement) {
+                continue;
+            }
+
+            $nodes = $xpath->query('.//a[@href]', $container);
+
+            foreach ($nodes ?: [] as $node) {
+                if (! $node instanceof \DOMElement) {
+                    continue;
+                }
+
+                if (! $this->albumListingBelongsToArtist($xpath, $node, $pageArtistName)) {
+                    continue;
+                }
+
+                $normalized = $this->normalizeAlbumListingHref((string) $node->getAttribute('href'));
+
+                if ($normalized !== null && ! in_array($normalized, $links, true)) {
+                    $links[] = $normalized;
+                }
+            }
+
+            if ($links !== []) {
+                break;
+            }
+        }
+
+        return $links;
+    }
+
+    private function isAlbumSectionHeading(string $value): bool
+    {
+        $normalized = GeniusNameMatcher::normalizeLoose($this->normalizeRawText($value));
+
+        if ($normalized === '' || ! str_contains($normalized, 'albom')) {
+            return false;
+        }
+
+        foreach (['rekom', 'pokhozh', 'pohozh', 'similar'] as $marker) {
+            if (str_contains($normalized, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function albumListingBelongsToArtist(\DOMXPath $xpath, \DOMElement $link, string $pageArtistName): bool
@@ -465,7 +566,7 @@ class MuzofondTrackParser
         }
 
         $albumTitle = $this->extractAlbumTitleFromPage($html, $pageArtistName);
-        $tracks = $this->extractTrackListItems($html, $pageArtistName, $albumTitle, [], false, ParsedTrack::SOURCE_ALBUM_PAGE);
+        $tracks = $this->extractTrackListItems($html, $pageArtistName, $albumTitle, [], [], false, ParsedTrack::SOURCE_ALBUM_PAGE);
 
         if ($this->debugParsingEnabled()) {
             Log::debug('Muzofond album page parsed.', [
@@ -565,10 +666,48 @@ class MuzofondTrackParser
      */
     private function uniqueTracksByAudioUrl(array $tracks): array
     {
-        return collect($tracks)
-            ->unique(fn (ParsedTrack $track) => Str::lower($track->audioUrl !== '' ? $track->audioUrl : ($track->title . '|' . $track->durationSeconds)))
-            ->values()
-            ->all();
+        $uniqueTracks = [];
+        $audioIndex = [];
+        $dedupIndex = [];
+
+        foreach ($tracks as $track) {
+            if (! $track instanceof ParsedTrack) {
+                continue;
+            }
+
+            $audioKey = Str::lower($track->audioUrl);
+            $dedupKeys = $this->parsedTrackDeduplicationKeys($track);
+            $existingIndex = $audioKey !== '' ? ($audioIndex[$audioKey] ?? null) : null;
+
+            if ($existingIndex === null) {
+                foreach ($dedupKeys as $dedupKey) {
+                    if (isset($dedupIndex[$dedupKey])) {
+                        $existingIndex = $dedupIndex[$dedupKey];
+                        break;
+                    }
+                }
+            }
+
+            if ($existingIndex === null) {
+                $uniqueTracks[] = $track;
+                $existingIndex = array_key_last($uniqueTracks);
+            } else {
+                $uniqueTracks[$existingIndex] = $this->preferredParsedTrack($uniqueTracks[$existingIndex], $track);
+            }
+
+            $storedTrack = $uniqueTracks[$existingIndex];
+            $storedAudioKey = Str::lower($storedTrack->audioUrl);
+
+            if ($storedAudioKey !== '') {
+                $audioIndex[$storedAudioKey] = $existingIndex;
+            }
+
+            foreach ($this->parsedTrackDeduplicationKeys($storedTrack) as $dedupKey) {
+                $dedupIndex[$dedupKey] = $existingIndex;
+            }
+        }
+
+        return array_values($uniqueTracks);
     }
 
     /**
@@ -626,13 +765,15 @@ class MuzofondTrackParser
         string $pageArtistName,
         ?string $defaultAlbumTitle = null,
         array $skippedAudioUrls = [],
+        array $skippedTrackKeys = [],
     ): array
     {
-        return $this->extractTrackListItems($html, $pageArtistName, $defaultAlbumTitle, $skippedAudioUrls, true, ParsedTrack::SOURCE_ARTIST_PAGE);
+        return $this->extractTrackListItems($html, $pageArtistName, $defaultAlbumTitle, $skippedAudioUrls, $skippedTrackKeys, true, ParsedTrack::SOURCE_ARTIST_PAGE);
     }
 
     /**
      * @param  string[]  $skippedAudioUrls
+     * @param  string[]  $skippedTrackKeys
      * @return ParsedTrack[]
      */
     private function extractTrackListItems(
@@ -640,6 +781,7 @@ class MuzofondTrackParser
         string $pageArtistName,
         ?string $defaultAlbumTitle = null,
         array $skippedAudioUrls = [],
+        array $skippedTrackKeys = [],
         bool $filterToMainArtistSection = false,
         string $sourceType = ParsedTrack::SOURCE_ARTIST_PAGE,
     ): array {
@@ -647,6 +789,11 @@ class MuzofondTrackParser
         $tracks = [];
         $skippedAudioLookup = collect($skippedAudioUrls)
             ->map(fn ($audioUrl) => Str::lower($this->absoluteUrl((string) $audioUrl)))
+            ->filter()
+            ->flip()
+            ->all();
+        $skippedTrackLookup = collect($skippedTrackKeys)
+            ->map(fn ($key) => Str::lower((string) $key))
             ->filter()
             ->flip()
             ->all();
@@ -731,7 +878,7 @@ class MuzofondTrackParser
             $albumTitle = $albumTitle !== null ? $this->normalizeText($albumTitle) : null;
             $albumTitle = $albumTitle !== '' ? $albumTitle : null;
 
-            $tracks[] = new ParsedTrack(
+            $track = new ParsedTrack(
                 title: $meta['title'],
                 durationSeconds: $durationSeconds,
                 audioUrl: $audioUrl,
@@ -742,6 +889,12 @@ class MuzofondTrackParser
                 genres: $genres,
                 sourceType: $sourceType,
             );
+
+            if ($this->parsedTrackSharesExistingIdentity($track, $skippedTrackLookup)) {
+                continue;
+            }
+
+            $tracks[] = $track;
         }
 
         return $this->uniqueTracksByAudioUrl($tracks);
@@ -757,6 +910,84 @@ class MuzofondTrackParser
         }
 
         return GeniusNameMatcher::bestArtistScore($pageArtistName, [$rawArtists]) >= 0.92;
+    }
+
+    /**
+     * @return string[]
+     */
+    private function parsedTrackDeduplicationKeys(ParsedTrack $track): array
+    {
+        $title = Str::lower(GeniusNameMatcher::storageValue($track->title));
+        $artistKey = collect($track->artistNames)
+            ->map(fn ($artist) => Str::lower($this->normalizeText((string) $artist)))
+            ->filter()
+            ->sort()
+            ->values()
+            ->implode('|');
+
+        if ($title === '' || $artistKey === '' || $track->durationSeconds <= 0) {
+            return [];
+        }
+
+        $keys = [$artistKey . '|' . $title . '|' . $track->durationSeconds];
+        $albumTitle = Str::lower($this->normalizeText((string) ($track->albumTitle ?? '')));
+
+        if ($albumTitle !== '') {
+            $keys[] = $artistKey . '|' . $title . '|' . $track->durationSeconds . '|' . $albumTitle;
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    /**
+     * @param  array<string, int>  $skippedTrackLookup
+     */
+    private function parsedTrackSharesExistingIdentity(ParsedTrack $track, array $skippedTrackLookup): bool
+    {
+        foreach ($this->parsedTrackDeduplicationKeys($track) as $dedupKey) {
+            if (isset($skippedTrackLookup[Str::lower($dedupKey)])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function preferredParsedTrack(ParsedTrack $current, ParsedTrack $incoming): ParsedTrack
+    {
+        $currentScore = $this->parsedTrackPriorityScore($current);
+        $incomingScore = $this->parsedTrackPriorityScore($incoming);
+
+        if ($incomingScore > $currentScore) {
+            return $incoming;
+        }
+
+        if ($incomingScore < $currentScore) {
+            return $current;
+        }
+
+        return strlen($incoming->audioUrl) < strlen($current->audioUrl)
+            ? $incoming
+            : $current;
+    }
+
+    private function parsedTrackPriorityScore(ParsedTrack $track): int
+    {
+        $score = $track->sourceType === ParsedTrack::SOURCE_ALBUM_PAGE ? 40 : 20;
+
+        if ($track->albumTitle !== null && $this->normalizeText($track->albumTitle) !== '') {
+            $score += 8;
+        }
+
+        if ($track->trackNumber !== null && $track->trackNumber > 0) {
+            $score += 4;
+        }
+
+        if (! empty($track->artistNames)) {
+            $score += 2;
+        }
+
+        return $score;
     }
 
     /**
@@ -964,8 +1195,16 @@ class MuzofondTrackParser
 
             $baseTitle = $this->normalizeRawText(mb_substr($title, 0, $position));
             $meta = $this->normalizeRawText(mb_substr($title, $position + 1, $length - $position - 2));
+            $hasWhitespaceBeforeBlock = $position > 0
+                && preg_match('/\s/u', mb_substr($title, $position - 1, 1)) === 1;
 
             if ($baseTitle === '' || $meta === '') {
+                return null;
+            }
+
+            if (! $hasWhitespaceBeforeBlock
+                && preg_match('/\p{L}$/u', $baseTitle) === 1
+                && ! $this->looksLikeCompactTrailingMetadata($meta)) {
                 return null;
             }
 
@@ -976,6 +1215,21 @@ class MuzofondTrackParser
         }
 
         return null;
+    }
+
+    private function looksLikeCompactTrailingMetadata(string $meta): bool
+    {
+        $normalized = GeniusNameMatcher::normalizeLoose($this->normalizeText($meta));
+
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(19|20)\d{2}\b/u', $meta) === 1) {
+            return true;
+        }
+
+        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|cover|ring(?: ?tone)?|caller tune|na zvonok)\b/iu', $normalized) === 1;
     }
 
     /**
@@ -1467,6 +1721,11 @@ class MuzofondTrackParser
 
     private function debugParsingEnabled(): bool
     {
-        return (bool) config('services.muzofond.debug_parsing', false);
+        return $this->debugParsingEnabled;
+    }
+
+    public function setNeedDebug(bool $debugParsingEnabled): void
+    {
+        $this->debugParsingEnabled = $debugParsingEnabled;
     }
 }

@@ -1617,7 +1617,10 @@ class GeniusCatalogSyncServiceTest extends TestCase
 
         $service->syncArtistPage($page);
 
-        $track = Track::query()->with('album')->firstOrFail();
+        $track = Track::query()
+            ->with('album')
+            ->where('audio_url', 'https://audio.test/papaoutai.mp3')
+            ->firstOrFail();
 
         $this->assertSame('Papaoutai', $track->title);
         $this->assertSame(401, $track->genius_id);
@@ -2013,6 +2016,253 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertSame(1, Album::query()->count());
     }
 
+    public function test_sync_artist_page_prefers_face_artist_over_face_family_noise_from_muzofond(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [
+                    ['id' => 1677217, 'name' => 'FACE FAMILY'],
+                    ['id' => 988966, 'name' => 'FACE'],
+                ];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    1677217 => ['id' => 1677217, 'name' => 'FACE FAMILY', 'alternate_names' => []],
+                    988966 => ['id' => 988966, 'name' => 'FACE', 'alternate_names' => []],
+                    default => null,
+                };
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return match ($artistId) {
+                    1677217 => [[
+                        'id' => 1,
+                        'title' => 'NOT THIS ONE',
+                        'primary_artists' => [['id' => 1677217, 'name' => 'FACE FAMILY']],
+                    ]],
+                    988966 => [[
+                        'id' => 501,
+                        'title' => 'Гоша рубчинский',
+                        'primary_artists' => [['id' => 988966, 'name' => 'FACE']],
+                        'album' => ['id' => 323781, 'name' => 'ПРОКЛЯТАЯ ПЕЧАТЬ (CURSED SEAL)'],
+                        'release_date_components' => ['year' => 2015, 'month' => 10, 'day' => 30],
+                    ]],
+                    default => [],
+                };
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return $artistId === 988966
+                    ? [[
+                        'id' => 323781,
+                        'name' => 'ПРОКЛЯТАЯ ПЕЧАТЬ (CURSED SEAL)',
+                        'primary_artists' => [['id' => 988966, 'name' => 'FACE']],
+                        'release_date' => '2015-10-30',
+                    ]]
+                    : [];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                if ($geniusId !== 501) {
+                    return null;
+                }
+
+                return [
+                    'id' => 501,
+                    'title' => 'Гоша рубчинский',
+                    'primary_artists' => [['id' => 988966, 'name' => 'FACE']],
+                    'featured_artists' => [],
+                    'album' => ['id' => 323781, 'name' => 'ПРОКЛЯТАЯ ПЕЧАТЬ (CURSED SEAL)', 'url' => 'https://genius.test/albums/323781'],
+                    'release_date' => '2015-10-30',
+                    'release_date_components' => ['year' => 2015, 'month' => 10, 'day' => 30],
+                    'song_art_image_url' => 'https://img.test/gosha.jpg',
+                    'tags' => [],
+                    'stats' => ['pageviews' => 500],
+                    'url' => 'https://genius.test/songs/501',
+                ];
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 323781) {
+                    return null;
+                }
+
+                return [
+                    'id' => 323781,
+                    'name' => 'ПРОКЛЯТАЯ ПЕЧАТЬ (CURSED SEAL)',
+                    'primary_artists' => [['id' => 988966, 'name' => 'FACE']],
+                    'release_date' => '2015-10-30',
+                ];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return $albumId === 323781 ? [501 => 2] : [];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'FACE FAMILY',
+            artistSlug: 'face',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Гоша рубчинский',
+                    durationSeconds: 170,
+                    audioUrl: 'https://audio.test/gosha-face-family.mp3',
+                    albumTitle: null,
+                    trackNumber: 2,
+                    artistNames: ['FACE FAMILY'],
+                    releaseYear: 2015,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $service->syncArtistPage($page);
+
+        $track = Track::query()->with('artist')->firstOrFail();
+
+        $this->assertSame('FACE', $track->artist?->name);
+        $this->assertSame(988966, $track->artist?->genius_id);
+        $this->assertFalse(Artist::query()->whereRaw('LOWER(name) = ?', ['face family'])->exists());
+    }
+
+    public function test_sync_artist_page_matches_funny_trolls_and_reuses_album_context_from_muzofond_album_page(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 1381291, 'name' => 'Король и Шут']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return $geniusId === 1381291
+                    ? ['id' => 1381291, 'name' => 'Король и Шут', 'alternate_names' => ['Korol I Shut']]
+                    : null;
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [[
+                    'id' => 4661173,
+                    'title' => 'Весёлые тролли (Funny Trolls)',
+                    'primary_artists' => [['id' => 1381291, 'name' => 'Король и Шут']],
+                    'album' => ['id' => 536102, 'name' => 'Будь как дома, Путник... (Make Yourself at Home, Traveler...)'],
+                    'release_date_components' => ['year' => 1997, 'month' => 1, 'day' => 1],
+                ]];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [[
+                    'id' => 536102,
+                    'name' => 'Будь как дома, Путник... (Make Yourself at Home, Traveler...)',
+                    'primary_artists' => [['id' => 1381291, 'name' => 'Король и Шут']],
+                    'release_date' => '1997-01-01',
+                ]];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                if ($geniusId !== 4661173) {
+                    return null;
+                }
+
+                return [
+                    'id' => 4661173,
+                    'title' => 'Весёлые тролли (Funny Trolls)',
+                    'primary_artists' => [['id' => 1381291, 'name' => 'Король и Шут']],
+                    'featured_artists' => [],
+                    'album' => ['id' => 536102, 'name' => 'Будь как дома, Путник... (Make Yourself at Home, Traveler...)', 'url' => 'https://genius.test/albums/536102'],
+                    'release_date' => '1997-01-01',
+                    'release_date_components' => ['year' => 1997, 'month' => 1, 'day' => 1],
+                    'song_art_image_url' => 'https://img.test/funny-trolls.jpg',
+                    'tags' => [],
+                    'stats' => ['pageviews' => 400],
+                    'url' => 'https://genius.test/songs/4661173',
+                ];
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 536102) {
+                    return null;
+                }
+
+                return [
+                    'id' => 536102,
+                    'name' => 'Будь как дома, Путник... (Make Yourself at Home, Traveler...)',
+                    'primary_artists' => [['id' => 1381291, 'name' => 'Король и Шут']],
+                    'release_date' => '1997-01-01',
+                ];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return $albumId === 536102 ? [4661173 => 12] : [];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Король и Шут',
+            artistSlug: 'korol-i-shut',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Весёлые тролли',
+                    durationSeconds: 161,
+                    audioUrl: 'https://audio.test/funny-trolls.mp3',
+                    albumTitle: 'Будь как дома, Путник...',
+                    trackNumber: 12,
+                    artistNames: ['Король и Шут'],
+                    releaseYear: 1997,
+                    genres: [],
+                    sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+                ),
+            ],
+        );
+
+        $service->syncArtistPage($page);
+
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(4661173, $track->genius_id);
+        $this->assertSame(12, $track->track_number);
+        $this->assertSame(
+            GeniusNameMatcher::albumStorageValue('Будь как дома, Путник... (Make Yourself at Home, Traveler...)'),
+            $track->album?->title,
+        );
+    }
+
     public function test_sync_artist_page_creates_genius_album_for_matched_face_track_when_local_album_is_missing(): void
     {
         $client = new class() extends GeniusClient {
@@ -2130,7 +2380,7 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertSame(501, $track->genius_id);
         $this->assertSame($album->id, $track->album_id);
         $this->assertSame(323781, $album->genius_id);
-        $this->assertStringContainsString('CURSED SEAL', (string) $album->title);
+        $this->assertStringNotContainsString('CURSED SEAL', (string) $album->title);
         $this->assertSame(['FACE'], $album->artists->pluck('name')->all());
     }
 
@@ -2272,5 +2522,437 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertSame($geniusAlbum->id, $track->album_id);
         $this->assertSame('WILD EA$T', $geniusAlbum->title);
         $this->assertNull($freshMuzofondAlbum);
+    }
+
+    public function test_sync_artist_page_prefers_original_song_over_demo_variant_with_same_canonical_title(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 11, 'name' => 'Mayot']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 11, 'name' => 'Mayot', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 5543624,
+                        'title' => 'White Force Alert (Demo)',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'release_date_components' => ['year' => 2020, 'month' => 5, 'day' => 1],
+                    ],
+                    [
+                        'id' => 5380392,
+                        'title' => 'White Force Alert',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'album' => ['id' => 9301, 'name' => 'Ghetto Garden'],
+                        'release_date_components' => ['year' => 2020, 'month' => 11, 'day' => 20],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 9301,
+                        'name' => 'Ghetto Garden',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'release_date' => '2020-11-20',
+                    ],
+                ];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    5543624 => [
+                        'id' => 5543624,
+                        'title' => 'White Force Alert (Demo)',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'featured_artists' => [],
+                        'release_date' => '2020-05-01',
+                        'release_date_components' => ['year' => 2020, 'month' => 5, 'day' => 1],
+                        'song_art_image_url' => 'https://img.test/white-force-demo.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 150],
+                        'url' => 'https://genius.test/songs/5543624',
+                    ],
+                    5380392 => [
+                        'id' => 5380392,
+                        'title' => 'White Force Alert',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 9301, 'name' => 'Ghetto Garden', 'url' => 'https://genius.test/albums/9301'],
+                        'release_date' => '2020-11-20',
+                        'release_date_components' => ['year' => 2020, 'month' => 11, 'day' => 20],
+                        'song_art_image_url' => 'https://img.test/white-force.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 500],
+                        'url' => 'https://genius.test/songs/5380392',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 9301) {
+                    return null;
+                }
+
+                return [
+                    'id' => 9301,
+                    'name' => 'Ghetto Garden',
+                    'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                    'release_date' => '2020-11-20',
+                    'cover_art_thumbnail_url' => 'https://img.test/ghetto-garden.jpg',
+                ];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return $albumId === 9301 ? [5380392 => 4] : [];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Mayot',
+            artistSlug: 'mayot',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'White Force Alert (Demo)',
+                    durationSeconds: 132,
+                    audioUrl: 'https://audio.test/white-force-alert-demo.mp3',
+                    albumTitle: null,
+                    trackNumber: 1,
+                    artistNames: ['Mayot'],
+                    releaseYear: 2020,
+                    genres: [],
+                ),
+            ],
+        );
+
+        $service->syncArtistPage($page);
+
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(5380392, $track->genius_id);
+        $this->assertSame('White Force Alert', $track->title);
+        $this->assertSame('Ghetto Garden', $track->album?->title);
+    }
+
+    public function test_sync_artist_page_does_not_fetch_full_album_track_catalog_when_album_page_already_points_to_original_album(): void
+    {
+        $client = new class() extends GeniusClient {
+            public int $allArtistAlbumsCalls = 0;
+            public int $albumTracksCalls = 0;
+
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 77, 'name' => 'Stromae']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 77, 'name' => 'Stromae', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [[
+                    'id' => 401,
+                    'title' => 'Papaoutai',
+                    'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                    'album' => ['id' => 501, 'name' => '√ (Racine carree)'],
+                    'release_date_components' => ['year' => 2013, 'month' => 8, 'day' => 16],
+                    'track_number' => 4,
+                ]];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                $this->allArtistAlbumsCalls++;
+
+                return [[
+                    'id' => 501,
+                    'name' => '√ (Racine carree)',
+                    'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                    'release_date' => '2013-08-16',
+                ]];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                if ($geniusId !== 401) {
+                    return null;
+                }
+
+                return [
+                    'id' => 401,
+                    'title' => 'Papaoutai',
+                    'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                    'featured_artists' => [],
+                    'album' => ['id' => 501, 'name' => '√ (Racine carree)', 'url' => 'https://genius.test/albums/501'],
+                    'release_date' => '2013-08-16',
+                    'release_date_components' => ['year' => 2013, 'month' => 8, 'day' => 16],
+                    'song_art_image_url' => 'https://img.test/papaoutai.jpg',
+                    'tags' => [],
+                    'stats' => ['pageviews' => 1000],
+                    'url' => 'https://genius.test/songs/401',
+                ];
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                if ($geniusId !== 501) {
+                    return null;
+                }
+
+                return [
+                    'id' => 501,
+                    'name' => '√ (Racine carree)',
+                    'primary_artists' => [['id' => 77, 'name' => 'Stromae']],
+                    'release_date' => '2013-08-16',
+                    'cover_art_thumbnail_url' => 'https://img.test/racine.jpg',
+                ];
+            }
+
+            public function albumTracks(int $albumId): array
+            {
+                $this->albumTracksCalls++;
+
+                return [];
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return $albumId === 501 ? [401 => 4] : [];
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Stromae',
+            artistSlug: 'stromae',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Papaoutai',
+                    durationSeconds: 233,
+                    audioUrl: 'https://audio.test/papaoutai-fast-path.mp3',
+                    albumTitle: 'Racine carree',
+                    trackNumber: 4,
+                    artistNames: ['Stromae'],
+                    releaseYear: 2013,
+                    genres: [],
+                    sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+                ),
+            ],
+        );
+
+        $service->syncArtistPage($page);
+
+        $track = Track::query()->with('album')->firstOrFail();
+
+        $this->assertSame(401, $track->genius_id);
+        $this->assertSame(501, $track->album?->genius_id);
+        $this->assertSame(1, $client->allArtistAlbumsCalls);
+        $this->assertSame(0, $client->albumTracksCalls);
+    }
+
+    public function test_sync_artist_page_retries_deferred_album_page_tracks_after_album_context_is_created(): void
+    {
+        $client = new class() extends GeniusClient {
+            public function __construct()
+            {
+            }
+
+            public function searchArtist(string $query): array
+            {
+                return [['id' => 11, 'name' => 'Mayot']];
+            }
+
+            public function artist(int $geniusId): ?array
+            {
+                return ['id' => 11, 'name' => 'Mayot', 'alternate_names' => []];
+            }
+
+            public function allArtistSongs(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 7564073,
+                        'title' => 'ТЕХНИКА (TECHNIQUE) (INTRO)',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot'], ['id' => 12, 'name' => 'Seemee']],
+                        'album' => ['id' => 597814, 'name' => 'SCUM OFF THE POT 2'],
+                        'release_date_components' => ['year' => 2022, 'month' => 6, 'day' => 24],
+                    ],
+                    [
+                        'id' => 990001,
+                        'title' => 'Оба',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'album' => ['id' => 880001, 'name' => 'Оба'],
+                        'release_date_components' => ['year' => 2023, 'month' => 4, 'day' => 14],
+                    ],
+                ];
+            }
+
+            public function allArtistAlbums(int $artistId): array
+            {
+                return [
+                    [
+                        'id' => 880001,
+                        'name' => 'Оба',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'release_date' => '2023-04-14',
+                    ],
+                    [
+                        'id' => 597814,
+                        'name' => 'SCUM OFF THE POT 2',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot'], ['id' => 12, 'name' => 'Seemee']],
+                        'release_date' => '2022-06-24',
+                    ],
+                ];
+            }
+
+            public function searchSongs(string $query): array
+            {
+                return [];
+            }
+
+            public function song(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    7564073 => [
+                        'id' => 7564073,
+                        'title' => 'ТЕХНИКА (TECHNIQUE) (INTRO)',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot'], ['id' => 12, 'name' => 'Seemee']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 597814, 'name' => 'SCUM OFF THE POT 2', 'url' => 'https://genius.test/albums/597814'],
+                        'release_date' => '2022-06-24',
+                        'release_date_components' => ['year' => 2022, 'month' => 6, 'day' => 24],
+                        'song_art_image_url' => 'https://img.test/technique.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 200],
+                        'url' => 'https://genius.test/songs/7564073',
+                    ],
+                    990001 => [
+                        'id' => 990001,
+                        'title' => 'Оба',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'featured_artists' => [],
+                        'album' => ['id' => 880001, 'name' => 'Оба', 'url' => 'https://genius.test/albums/880001'],
+                        'release_date' => '2023-04-14',
+                        'release_date_components' => ['year' => 2023, 'month' => 4, 'day' => 14],
+                        'song_art_image_url' => 'https://img.test/oba.jpg',
+                        'tags' => [],
+                        'stats' => ['pageviews' => 120],
+                        'url' => 'https://genius.test/songs/990001',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function album(int $geniusId): ?array
+            {
+                return match ($geniusId) {
+                    880001 => [
+                        'id' => 880001,
+                        'name' => 'Оба',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot']],
+                        'release_date' => '2023-04-14',
+                        'cover_art_thumbnail_url' => 'https://img.test/oba-cover.jpg',
+                    ],
+                    597814 => [
+                        'id' => 597814,
+                        'name' => 'SCUM OFF THE POT 2',
+                        'primary_artists' => [['id' => 11, 'name' => 'Mayot'], ['id' => 12, 'name' => 'Seemee']],
+                        'release_date' => '2022-06-24',
+                        'cover_art_thumbnail_url' => 'https://img.test/scum-cover.jpg',
+                    ],
+                    default => null,
+                };
+            }
+
+            public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
+            {
+                return match ($albumId) {
+                    880001 => [990001 => 2],
+                    597814 => [7564073 => 1],
+                    default => [],
+                };
+            }
+        };
+
+        $service = new GeniusCatalogSyncService($client);
+        $page = new ParsedArtistPage(
+            artistName: 'Mayot',
+            artistSlug: 'mayot',
+            imageUrl: null,
+            tracks: [
+                new ParsedTrack(
+                    title: 'Техника',
+                    durationSeconds: 91,
+                    audioUrl: 'https://audio.test/oba-technique.mp3',
+                    albumTitle: 'Оба',
+                    trackNumber: 1,
+                    artistNames: ['Mayot', 'Seemee'],
+                    releaseYear: 2023,
+                    genres: [],
+                    sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+                ),
+                new ParsedTrack(
+                    title: 'Оба',
+                    durationSeconds: 140,
+                    audioUrl: 'https://audio.test/oba-title-track.mp3',
+                    albumTitle: 'Оба',
+                    trackNumber: 2,
+                    artistNames: ['Mayot'],
+                    releaseYear: 2023,
+                    genres: [],
+                    sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+                ),
+            ],
+        );
+
+        $result = $service->syncArtistPage($page);
+
+        $techniqueTrack = Track::query()
+            ->with('album')
+            ->where('audio_url', 'https://audio.test/oba-technique.mp3')
+            ->firstOrFail();
+        $album = Album::query()->where('genius_id', 880001)->firstOrFail();
+
+        $this->assertSame(2, $result['matched_tracks']);
+        $this->assertSame(0, $result['unmatched_tracks']);
+        $this->assertSame(7564073, $techniqueTrack->genius_id);
+        $this->assertSame($album->id, $techniqueTrack->album_id);
+        $this->assertSame('Оба', $techniqueTrack->album?->title);
     }
 }
