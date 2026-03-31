@@ -431,11 +431,34 @@ class GeniusClient
         return $map;
     }
 
-    private function sanitizePayload(mixed $value, ?string $key = null): mixed
+    private function sanitizePayload(mixed $value, ?string $key = null, int $depth = 0): mixed
     {
+        if ($depth >= 8) {
+            if (is_string($value)) {
+                return mb_substr(GeniusNameMatcher::forceUtf8($value), 0, 2000);
+            }
+
+            return is_array($value) ? [] : $value;
+        }
+
         if (is_array($value)) {
+            if ($key !== null && in_array($key, [
+                'description',
+                'description_annotation',
+                'description_dom',
+                'children',
+                'tracking_paths',
+                'body',
+            ], true)) {
+                return [];
+            }
+
+            if (count($value) > 250 && ! in_array($key, ['songs', 'albums', 'tracks', 'hits', 'sections'], true)) {
+                $value = array_slice($value, 0, 120, true);
+            }
+
             foreach ($value as $itemKey => $item) {
-                $value[$itemKey] = $this->sanitizePayload($item, is_string($itemKey) ? $itemKey : null);
+                $value[$itemKey] = $this->sanitizePayload($item, is_string($itemKey) ? $itemKey : null, $depth + 1);
             }
 
             return $value;
@@ -446,7 +469,13 @@ class GeniusClient
                 return GeniusNameMatcher::cleanDescriptionPreview($value);
             }
 
-            return GeniusNameMatcher::forceUtf8($value);
+            $value = GeniusNameMatcher::forceUtf8($value);
+
+            if (mb_strlen($value) > 4000) {
+                return mb_substr($value, 0, 4000);
+            }
+
+            return $value;
         }
 
         return $value;
