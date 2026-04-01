@@ -924,20 +924,34 @@ class MuzofondTrackParser
     private function parsedTrackDeduplicationKeys(ParsedTrack $track): array
     {
         $title = Str::lower(GeniusNameMatcher::storageValue($track->title));
+        $canonicalTitle = Str::lower(GeniusNameMatcher::canonicalTrack($track->title));
         $artistKey = collect($track->artistNames)
             ->map(fn ($artist) => Str::lower($this->normalizeText((string) $artist)))
             ->filter()
             ->sort()
             ->values()
             ->implode('|');
+        $looseArtistKey = collect($track->artistNames)
+            ->map(fn ($artist) => Str::lower(GeniusNameMatcher::normalizeLoose((string) $artist)))
+            ->filter()
+            ->sort()
+            ->values()
+            ->implode('|');
 
-        if ($title === '' || $artistKey === '') {
+        if (($title === '' && $canonicalTitle === '') || ($artistKey === '' && $looseArtistKey === '')) {
             return [];
         }
 
-        return [
-            $artistKey . '|' . $title,
-        ];
+        return collect([
+            ($artistKey !== '' && $title !== '') ? $artistKey . '|' . $title : null,
+            ($looseArtistKey !== '' && $title !== '') ? $looseArtistKey . '|' . $title : null,
+            ($artistKey !== '' && $canonicalTitle !== '') ? $artistKey . '|' . $canonicalTitle : null,
+            ($looseArtistKey !== '' && $canonicalTitle !== '') ? $looseArtistKey . '|' . $canonicalTitle : null,
+        ])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -1120,7 +1134,7 @@ class MuzofondTrackParser
                 $normalizedBaseTitle = GeniusNameMatcher::canonicalTrack($baseTitle);
 
                 if ($parsed['recognized']) {
-                    if ($parsed['ringtone'] ?? false) {
+                    if (($parsed['ringtone'] ?? false) || ($parsed['version'] ?? false)) {
                         return [
                             'title' => $this->normalizeRawText($baseTitle . ' (' . $meta . ')'),
                             'album' => null,
@@ -1233,9 +1247,10 @@ class MuzofondTrackParser
         return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|cover|ring(?: ?tone)?|caller tune|na zvonok)\b/iu', $normalized) === 1;
     }
 
+
     /**
      * @param  string[]  $genresFromDescription
-     * @return array{recognized:bool, album:?string, year:?int, ringtone:bool}
+     * @return array{recognized:bool, album:?string, year:?int, ringtone:bool, version:bool}
      */
     private function parseMetaBlock(string $meta, array $genresFromDescription): array
     {
@@ -1247,6 +1262,7 @@ class MuzofondTrackParser
                 'album' => null,
                 'year' => null,
                 'ringtone' => false,
+                'version' => false,
             ];
         }
 
@@ -1285,14 +1301,26 @@ class MuzofondTrackParser
         }
 
         $ringtone = $this->metaContainsRingtoneMarkers($normalizedMeta);
-        $album = $meta !== '' && ! $ringtone ? $meta : null;
+        $version = $this->metaContainsVersionMarkers($normalizedMeta);
+        $album = $meta !== '' && ! $ringtone && ! $version ? $meta : null;
 
         return [
-            'recognized' => $year !== null || $album !== null || $ringtone,
+            'recognized' => $year !== null || $album !== null || $ringtone || $version,
             'album' => $album,
             'year' => $year,
             'ringtone' => $ringtone,
+            'version' => $version,
         ];
+    }
+
+
+    private function metaContainsVersionMarkers(string $normalizedMeta): bool
+    {
+        if ($normalizedMeta === '') {
+            return false;
+        }
+
+        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|acoustic|karaoke|edit|radio\s+edit|remaster(?:ed)?|slowed?|slow|reverb(?:ed)?|speed\s*up|sped\s*up|nightcore)\b/iu', $normalizedMeta) === 1;
     }
 
     private function metaContainsRingtoneMarkers(string $normalizedMeta): bool

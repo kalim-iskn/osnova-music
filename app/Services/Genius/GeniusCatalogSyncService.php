@@ -1968,6 +1968,10 @@ class GeniusCatalogSyncService
             return true;
         }
 
+        if ((float) ($bestCandidate['score'] ?? 0.0) < 0.9 || (float) ($bestCandidate['title_priority'] ?? 0.0) < 0.965) {
+            return true;
+        }
+
         if ($parsedAlbumTitle && (int) ($bestCandidate['album_preference'] ?? 0) < 2) {
             return true;
         }
@@ -4947,6 +4951,7 @@ class GeniusCatalogSyncService
     private function normalizeAlbumComparisonTitle(string $value): string
     {
         $value = $this->unwrapLeadingSymbolicAlbumPrefix($this->storedAlbumTitle($value));
+        $value = $this->normalizeRomanNumeralsInAlbumTitle($value);
         $value = preg_replace('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio\s+edit|edit|deluxe|expanded|bonus|ep|single|version|edition|remaster(?:ed)?|ring(?: ?tone)?|caller\s+tune)\b/iu', ' ', $value) ?? $value;
         $value = str_replace(['(', ')', '[', ']', '{', '}'], ' ', $value);
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;
@@ -4957,6 +4962,38 @@ class GeniusCatalogSyncService
         }
 
         return $this->normalizeSymbolicAlbumTitle($value);
+    }
+
+    private function normalizeRomanNumeralsInAlbumTitle(string $value): string
+    {
+        return preg_replace_callback('/\b(?<roman>m{0,4}(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{1,3}))\b/iu', function (array $matches): string {
+            $roman = Str::upper((string) ($matches['roman'] ?? ''));
+
+            if ($roman === '') {
+                return '';
+            }
+
+            $map = ['I' => 1, 'V' => 5, 'X' => 10, 'L' => 50, 'C' => 100, 'D' => 500, 'M' => 1000];
+            $total = 0;
+            $previous = 0;
+
+            foreach (array_reverse(str_split($roman)) as $symbol) {
+                $value = $map[$symbol] ?? 0;
+
+                if ($value <= 0) {
+                    return $roman;
+                }
+
+                if ($value < $previous) {
+                    $total -= $value;
+                } else {
+                    $total += $value;
+                    $previous = $value;
+                }
+            }
+
+            return $total > 0 ? (string) $total : $roman;
+        }, $value) ?? $value;
     }
 
     private function normalizeSymbolicAlbumTitle(string $value): string
