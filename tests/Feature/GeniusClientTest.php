@@ -10,6 +10,56 @@ use Tests\TestCase;
 
 class GeniusClientTest extends TestCase
 {
+    public function test_song_search_results_are_reused_from_compact_cache_across_runs(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        config()->set('services.genius.cache_ttl', 3600);
+        Cache::flush();
+        Http::fake([
+            'https://genius.test/api/search*' => Http::response([
+                'response' => [
+                    'hits' => [[
+                        'result' => [
+                            'id' => 501,
+                            'title' => 'Papaoutai',
+                            'artist_names' => 'Stromae',
+                            'album' => ['name' => '√ (Racine carrée)'],
+                        ],
+                    ]],
+                ],
+            ]),
+        ]);
+
+        $firstClient = new GeniusClient();
+        $firstClient->beginRun();
+        $firstResults = $firstClient->searchSongs('Stromae Papaoutai');
+
+        $secondClient = new GeniusClient();
+        $secondClient->beginRun();
+        $secondResults = $secondClient->searchSongs('Stromae Papaoutai');
+
+        $this->assertSame($firstResults, $secondResults);
+        $this->assertSame(501, $secondResults[0]['id']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_runtime_search_cache_is_bounded(): void
+    {
+        $client = new GeniusClient();
+        $remember = (new \ReflectionClass($client))->getMethod('rememberRuntimeSearchPayload');
+
+        for ($index = 0; $index < 300; $index++) {
+            $remember->invoke($client, 'genius:test:' . $index, ['response' => ['hits' => []]]);
+        }
+
+        $keys = (new \ReflectionClass($client))->getProperty('runtimeSearchCacheKeys')->getValue($client);
+        $runtimeCache = (new \ReflectionClass($client))->getProperty('runtimeCache')->getValue($client);
+
+        $this->assertCount(256, $keys);
+        $this->assertCount(256, $runtimeCache);
+        $this->assertArrayNotHasKey('genius:test:0', $runtimeCache);
+    }
+
     public function test_all_artist_songs_requests_featured_tracks_and_all_pages(): void
     {
         config()->set('services.genius.base_url', 'https://genius.test/api');
@@ -94,6 +144,51 @@ class GeniusClientTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/albums/29/tracks'));
+    }
+
+    public function test_album_tracks_many_fetches_album_pages_as_one_bounded_batch(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        config()->set('services.genius.album_track_concurrency', 2);
+        config()->set('services.genius.songs_per_page', 10);
+        Cache::flush();
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            preg_match('~/albums/(\d+)/tracks~', $request->url(), $matches);
+            $albumId = (int) ($matches[1] ?? 0);
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $page = (int) ($query['page'] ?? 1);
+            $tracks = [];
+
+            if ($albumId === 29 && $page === 1) {
+                for ($number = 1; $number <= 10; $number++) {
+                    $tracks[] = [
+                        'number' => $number,
+                        'song' => ['id' => 1028 + $number, 'title' => 'Track ' . $number],
+                    ];
+                }
+            } else {
+                $tracks[] = [
+                    'number' => 11,
+                    'song' => ['id' => 1039, 'title' => 'Track 11'],
+                ];
+            }
+
+            return Http::response([
+                'response' => [
+                    'tracks' => $tracks,
+                    'next_page' => $albumId === 29 && $page === 1 ? 2 : null,
+                ],
+            ]);
+        });
+
+        $tracksByAlbum = (new GeniusClient())->albumTracksMany([29, 30, 29, 0]);
+
+        $this->assertCount(11, $tracksByAlbum[29]);
+        $this->assertCount(1, $tracksByAlbum[30]);
+        Http::assertSentCount(3);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/albums/29/tracks'));
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/albums/30/tracks'));
     }
 
     public function test_all_artist_songs_returns_empty_array_on_404_instead_of_throwing(): void

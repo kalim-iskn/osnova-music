@@ -15,6 +15,8 @@ services:
       - ./:/var/www/html
       # быстрый vendor для PHP (vendor copy в windows: docker cp work_project_php:/opt/app/vendor ./vendor)
       - vendor_data:/var/www/html/vendor
+      - ./docker/supervisor/supervisord.conf:/etc/supervisor.d/supervisord.ini:ro
+      - ./docker/supervisor/supervisord.conf:/etc/supervisor.d/supervisord.ini:ro
 
   db:
     image: postgres:18-alpine

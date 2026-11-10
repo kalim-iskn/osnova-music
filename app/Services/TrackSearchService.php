@@ -66,7 +66,7 @@ class TrackSearchService
         $term = trim((string) $term);
 
         return Track::query()
-            ->with(['artist', 'artists', 'album', 'album.artists'])
+            ->with(['artist', 'artists', 'album', 'album.artists', 'albums', 'albums.artists'])
             ->when($term !== '', function ($query) use ($term) {
                 $query->where(function ($subQuery) use ($term) {
                     $subQuery
@@ -77,9 +77,10 @@ class TrackSearchService
                         ->orWhereHas('artists', fn ($artistQuery) => $artistQuery
                             ->where('name', 'ILIKE', "%{$term}%")
                             ->orWhere('slug', 'ILIKE', "%{$term}%"))
-                        ->orWhereHas('album', fn ($albumQuery) => $albumQuery
-                            ->where('title', 'ILIKE', "%{$term}%")
-                            ->orWhere('slug', 'ILIKE', "%{$term}%"));
+                        ->orWhereHas('albums', fn ($albumQuery) => $albumQuery
+                            ->where(fn ($albumTerms) => $albumTerms
+                                ->where('title', 'ILIKE', "%{$term}%")
+                                ->orWhere('slug', 'ILIKE', "%{$term}%")));
                 });
             });
     }

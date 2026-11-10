@@ -30,33 +30,31 @@ const handleLikeChanged = (trackId, liked) => {
     <section class="section-block">
         <div class="section-heading">
             <div>
-                <span class="eyebrow">Коллекция</span>
+                <span class="eyebrow">Моя коллекция</span>
                 <h1>Мои треки</h1>
                 <p class="section-description">
-                    Всё, что вы отметили, хранится здесь — удобно возвращаться к любимой музыке в любой момент.
+                    Треки, которые вы выбрали. Всё любимое — в одном месте.
                 </p>
             </div>
 
             <span class="badge badge--large">{{ totalTracks }}</span>
         </div>
 
-        <div class="panel-card">
-            <div v-if="likedTracks.length" class="track-list">
-                <TrackRow
-                    v-for="track in likedTracks"
-                    :key="track.id"
-                    :track="track"
-                    :queue="likedTracks"
-                    @like-changed="(liked) => handleLikeChanged(track.id, liked)"
-                />
-            </div>
-
-            <div v-else class="empty-state empty-state--large">
-                <p>Пока здесь пусто. Ставьте лайки понравившимся трекам, и они появятся в вашей коллекции.</p>
-                <Link href="/search" class="primary-button">Перейти к каталогу</Link>
-            </div>
-
-            <PaginationBar :pagination="pagination" />
+        <div v-if="likedTracks.length" class="track-list library-track-list">
+            <TrackRow
+                v-for="track in likedTracks"
+                :key="track.id"
+                :track="track"
+                :queue="likedTracks"
+                @like-changed="(liked) => handleLikeChanged(track.id, liked)"
+            />
         </div>
+
+        <div v-else class="panel-card empty-state empty-state--large">
+            <p>В коллекции пока пусто. Добавляйте понравившиеся треки, чтобы они появились здесь.</p>
+            <Link href="/search" class="primary-button">Перейти к каталогу</Link>
+        </div>
+
+        <PaginationBar :pagination="pagination" />
     </section>
 </template>

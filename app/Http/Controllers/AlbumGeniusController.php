@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Album;
 use App\Services\Genius\GeniusClient;
 use App\Services\Genius\GeniusNameMatcher;
+use App\Support\ArtworkUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -29,7 +30,10 @@ class AlbumGeniusController extends Controller
                     'id' => (int) ($payload['id'] ?? 0),
                     'title' => GeniusNameMatcher::storageValue((string) ($payload['name'] ?? $album->title)),
                     'description_preview' => $payload['description_preview'] ?? null,
-                    'cover_image_url' => $payload['cover_art_thumbnail_url'] ?? $payload['cover_art_url'] ?? null,
+                    'cover_image_url' => ArtworkUrl::firstUsable(
+                        $payload['cover_art_thumbnail_url'] ?? null,
+                        $payload['cover_art_url'] ?? null,
+                    ),
                     'release_date' => $payload['release_date_for_display'] ?? $payload['release_date'] ?? null,
                     'url' => $payload['url'] ?? null,
                 ],

@@ -7,6 +7,10 @@ const props = defineProps({
         type: String,
         default: '',
     },
+    compact: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const query = ref(props.initialQuery);
@@ -37,11 +41,18 @@ const submit = () => {
             type="search"
             name="q"
             class="search-box__input"
-            placeholder="Искать треки, исполнителей и альбомы"
+            placeholder="Треки, артисты, альбомы"
             autocomplete="off"
             aria-label="Поиск по каталогу"
         >
 
-        <button class="search-box__button" type="submit">Найти</button>
+        <button
+            class="search-box__button"
+            :class="{ 'search-box__button--icon': compact }"
+            :aria-label="compact ? 'Найти' : undefined"
+            type="submit"
+        >
+            {{ compact ? '⌕' : 'Найти' }}
+        </button>
     </form>
 </template>

@@ -7,6 +7,7 @@ import SocialIconLink from '../../Components/SocialIconLink.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { usePlayerStore } from '../../stores/player';
 import { formatCount, formatNumberedCount } from '../../utils/pluralize';
+import { formatAlbumReleaseDate } from '../../utils/releaseDate';
 
 defineOptions({ layout: AppLayout });
 
@@ -95,12 +96,9 @@ onMounted(fetchRuntime);
     </section>
 
     <section class="section-grid">
-        <div class="panel-card">
+        <div class="artist-page__section">
             <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Треки</span>
-                    <h2>Треки исполнителя</h2>
-                </div>
+                <h2>Треки исполнителя</h2>
                 <span class="badge">{{ totalTracks }}</span>
             </div>
 
@@ -114,15 +112,16 @@ onMounted(fetchRuntime);
                 />
             </div>
 
+            <p v-if="!trackItems.length" class="empty-state artist-page__empty">
+                В каталоге пока нет треков исполнителя.
+            </p>
+
             <PaginationBar :pagination="pagination" />
         </div>
 
-        <div class="panel-card">
+        <div class="artist-page__section">
             <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Альбомы</span>
-                    <h2>Релизы</h2>
-                </div>
+                <h2>Альбомы</h2>
                 <span class="badge">{{ albums.length }}</span>
             </div>
 
@@ -132,7 +131,7 @@ onMounted(fetchRuntime);
 
                     <div class="album-card__body">
                         <strong>{{ album.title }}</strong>
-                        <small>{{ album.release_date ?? 'Дата релиза уточняется' }}</small>
+                        <small>{{ formatAlbumReleaseDate(album) ?? 'Дата релиза уточняется' }}</small>
                     </div>
                 </Link>
             </div>
@@ -170,19 +169,19 @@ onMounted(fetchRuntime);
     padding: 0.85rem 1.4rem;
     border: 0;
     border-radius: 999px;
-    background: linear-gradient(135deg, #7c3aed, #ec4899);
+    background: #293235;
     color: #fff;
     font-weight: 700;
     font-size: 0.95rem;
     cursor: pointer;
-    box-shadow: 0 16px 32px rgba(124, 58, 237, 0.24);
-    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    box-shadow: none;
+    transition: transform 0.18s ease, background-color 0.18s ease, opacity 0.18s ease;
 }
 
 .artist-page__play-button:hover:not(:disabled),
 .artist-page__play-button:focus-visible:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 20px 40px rgba(124, 58, 237, 0.3);
+    background: #171e20;
 }
 
 .artist-page__play-button:disabled {

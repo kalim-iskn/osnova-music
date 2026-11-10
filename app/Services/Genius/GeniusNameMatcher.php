@@ -15,9 +15,10 @@ class GeniusNameMatcher
         }
 
         if (mb_check_encoding($value, 'UTF-8')) {
+            $value = self::repairMojibake($value);
             $value = self::stripInvalidUtf8Sequences($value) ?: $value;
 
-            return self::repairMojibake($value);
+            return $value;
         }
 
         foreach (['Windows-1251', 'CP1251', 'ISO-8859-1'] as $encoding) {
@@ -607,7 +608,7 @@ class GeniusNameMatcher
 
         $value = self::normalizeCommonBrokenSymbols($value);
 
-        if (! self::looksLikeMojibake($value)) {
+        if (! self::looksLikeMojibake($value) && ! self::looksLikeCollapsedMojibake($value)) {
             return $value;
         }
 
@@ -616,34 +617,18 @@ class GeniusNameMatcher
         $candidates = [$value];
 
         foreach (['Windows-1251', 'CP1251', 'Windows-1252', 'ISO-8859-1'] as $encoding) {
-            $step = @iconv('UTF-8', $encoding . '//IGNORE', $value);
+            $current = $value;
 
-            if (is_string($step) && $step !== '') {
-                $fixed = @iconv($encoding, 'UTF-8//IGNORE', $step);
+            for ($attempt = 0; $attempt < 3; $attempt++) {
+                $fixed = self::reinterpretUtf8Mojibake($current, $encoding);
 
-                if (is_string($fixed) && $fixed !== '') {
-                    $candidates[] = $fixed;
+                if ($fixed === null || $fixed === '' || $fixed === $current) {
+                    break;
                 }
+
+                $candidates[] = $fixed;
+                $current = $fixed;
             }
-        }
-
-        $current = $value;
-
-        for ($attempt = 0; $attempt < 2; $attempt++) {
-            $step = @iconv('UTF-8', 'Windows-1251//IGNORE', $current);
-
-            if (! is_string($step) || $step === '') {
-                break;
-            }
-
-            $fixed = @iconv('Windows-1251', 'UTF-8//IGNORE', $step);
-
-            if (! is_string($fixed) || $fixed === '') {
-                break;
-            }
-
-            $candidates[] = $fixed;
-            $current = $fixed;
         }
 
         foreach ($candidates as $candidate) {
@@ -655,13 +640,58 @@ class GeniusNameMatcher
             $candidate = trim($candidate);
             $score = self::readabilityScore($candidate);
 
-            if ($score > $bestScore) {
+            $candidateReadableWords = self::readableWordCount($candidate);
+            $bestReadableWords = self::readableWordCount($best);
+
+            if (
+                $candidateReadableWords > $bestReadableWords
+                || (
+                    $candidateReadableWords > 0
+                    && (
+                        $score > $bestScore
+                        || (
+                            abs($score - $bestScore) < 0.0001
+                            && self::isMojibakeCandidate($best)
+                            && ! self::isMojibakeCandidate($candidate)
+                        )
+                    )
+                )
+            ) {
                 $best = $candidate;
                 $bestScore = $score;
             }
         }
 
         return self::looksReadable($best) ? $best : $value;
+    }
+
+    private static function reinterpretUtf8Mojibake(string $value, string $encoding): ?string
+    {
+        $reencoded = @iconv('UTF-8', $encoding . '//IGNORE', $value);
+
+        if (! is_string($reencoded) || $reencoded === '') {
+            return null;
+        }
+
+        $reencoded = self::stripInvalidUtf8Sequences($reencoded) ?: $reencoded;
+
+        if (! mb_check_encoding($reencoded, 'UTF-8')) {
+            return null;
+        }
+
+        return $reencoded;
+    }
+
+    private static function isMojibakeCandidate(string $value): bool
+    {
+        return self::looksLikeMojibake($value) || self::looksLikeCollapsedMojibake($value);
+    }
+
+    private static function readableWordCount(string $value): int
+    {
+        $count = preg_match_all('/[\p{L}]{3,}/u', $value);
+
+        return is_int($count) ? $count : 0;
     }
 
     private static function artistVariants(string $value): array
@@ -973,6 +1003,11 @@ class GeniusNameMatcher
     private static function looksLikeMojibake(string $value): bool
     {
         return preg_match('/(?:Р[А-Яа-яЁёA-Za-z]|С[А-Яа-яЁёA-Za-z]|Ð.|Ñ.|Ã.|Â.|â.|€.){2,}/u', $value) === 1;
+    }
+
+    private static function looksLikeCollapsedMojibake(string $value): bool
+    {
+        return preg_match('/(?:[РСГв][^\s]){3,}/u', $value) === 1;
     }
 
     private static function readabilityScore(string $value): float

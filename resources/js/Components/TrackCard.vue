@@ -81,9 +81,13 @@ const addToQueue = () => {
 <style scoped>
 .track-card {
     display: grid;
-    grid-template-columns: 88px minmax(0, 1fr);
-    gap: 1rem;
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 14px;
     align-items: center;
+    height: 100%;
+    min-height: 158px;
+    padding: 14px;
+    border-radius: 18px;
     overflow: visible;
 }
 
@@ -97,25 +101,28 @@ const addToQueue = () => {
 
 .track-card__cover {
     display: block;
-    width: 88px;
-    height: 88px;
+    width: 84px;
+    height: 84px;
     object-fit: cover;
-    border-radius: 18px;
+    border-radius: 14px;
 }
 
 .track-card__play {
     position: absolute;
-    right: 0.55rem;
-    bottom: 0.55rem;
+    right: 6px;
+    bottom: 6px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 2rem;
-    height: 2rem;
-    padding: 0 0.55rem;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
     border-radius: 999px;
-    background: rgba(12, 14, 18, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    background: #293235;
+    border: 0;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
 }
 
 .track-card__body,
@@ -123,10 +130,33 @@ const addToQueue = () => {
     min-width: 0;
 }
 
+.track-card__body {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    justify-content: center;
+    gap: 8px;
+    padding: 0;
+}
+
+.track-card__meta {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+}
+
 .track-card__title {
     margin: 0;
-    font-size: 1rem;
-    line-height: 1.35;
+    font-size: 0.98rem;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+}
+
+.track-card__title a {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
 }
 
 .track-card__title a,
@@ -137,17 +167,22 @@ const addToQueue = () => {
 
 .track-card__artist,
 .track-card__album {
-    margin-top: 0.32rem;
+    margin-top: 2px;
     min-width: 0;
-    color: rgba(255, 255, 255, 0.74);
+    color: var(--text-soft);
+    font-size: 0.84rem;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .track-card__footer {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.9rem;
+    gap: 8px;
+    margin-top: auto;
     min-width: 0;
     overflow: visible;
 }
@@ -155,36 +190,50 @@ const addToQueue = () => {
 .track-card__controls {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 6px;
     min-width: 0;
     overflow: visible;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+}
+
+.track-card__controls :deep(.ghost-button--small) {
+    padding: 8px 11px;
+    font-size: 0.82rem;
 }
 
 .track-card__duration {
     flex: 0 0 auto;
-    color: rgba(255, 255, 255, 0.62);
+    margin-left: auto;
+    color: var(--text-soft);
     white-space: nowrap;
+    font-size: 0.82rem;
 }
 
 @media (max-width: 640px) {
     .track-card {
-        grid-template-columns: 72px minmax(0, 1fr);
+        grid-template-columns: 68px minmax(0, 1fr);
+        min-height: 132px;
+        gap: 12px;
+        padding: 12px;
     }
 
     .track-card__cover {
-        width: 72px;
-        height: 72px;
-        border-radius: 16px;
+        width: 68px;
+        height: 68px;
+        border-radius: 12px;
     }
 
     .track-card__footer {
-        grid-template-columns: 1fr;
-        align-items: start;
+        gap: 6px;
     }
 
-    .track-card__duration {
-        justify-self: end;
+    .track-card__controls {
+        gap: 5px;
+    }
+
+    .track-card__controls :deep(.ghost-button--small) {
+        padding: 7px 9px;
+        font-size: 0.78rem;
     }
 }
 </style>

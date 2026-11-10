@@ -11,6 +11,8 @@ const pointerStartY = ref(0);
 const pointerCurrentY = ref(0);
 const isPointerDragging = ref(false);
 const itemRefs = new Map();
+let pointerFrame = 0;
+let pendingClientY = 0;
 
 const queue = computed(() => player.queue);
 
@@ -38,13 +40,42 @@ const onPointerMove = (event) => {
     }
 
     event.preventDefault();
-    pointerCurrentY.value = event.clientY;
-    dropIndex.value = resolveDropIndex(event.clientY);
+    pendingClientY = event.clientY;
+
+    if (pointerFrame) {
+        return;
+    }
+
+    pointerFrame = requestAnimationFrame(() => {
+        pointerFrame = 0;
+        pointerCurrentY.value = pendingClientY;
+        dropIndex.value = resolveDropIndex(pendingClientY);
+    });
 };
 
-const onPointerUp = () => {
-    if (dragIndex.value !== null && dropIndex.value !== null && dragIndex.value !== dropIndex.value) {
-        player.moveQueueItem(dragIndex.value, dropIndex.value);
+const onPointerUp = (event) => {
+    if (pointerFrame) {
+        cancelAnimationFrame(pointerFrame);
+        pointerFrame = 0;
+    }
+
+    if (dragIndex.value !== null && Number.isFinite(event?.clientY)) {
+        pointerCurrentY.value = event.clientY;
+        const finalIndex = resolveDropIndex(event.clientY);
+
+        if (finalIndex !== dragIndex.value) {
+            player.moveQueueItem(dragIndex.value, finalIndex);
+        }
+    }
+
+    detachPointerListeners();
+    resetDragState();
+};
+
+const onPointerCancel = () => {
+    if (pointerFrame) {
+        cancelAnimationFrame(pointerFrame);
+        pointerFrame = 0;
     }
 
     detachPointerListeners();
@@ -52,9 +83,14 @@ const onPointerUp = () => {
 };
 
 const detachPointerListeners = () => {
+    if (pointerFrame) {
+        cancelAnimationFrame(pointerFrame);
+        pointerFrame = 0;
+    }
+
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', onPointerUp);
-    window.removeEventListener('pointercancel', onPointerUp);
+    window.removeEventListener('pointercancel', onPointerCancel);
 };
 
 const resolveDropIndex = (clientY) => {
@@ -64,20 +100,25 @@ const resolveDropIndex = (clientY) => {
         return dragIndex.value;
     }
 
-    let fallbackIndex = entries[entries.length - 1][0];
+    let finalIndex = 0;
 
     for (const [index, element] of entries) {
-        const rect = element.getBoundingClientRect();
-        const midpoint = rect.top + rect.height / 2;
-
-        if (clientY < midpoint) {
-            return index;
+        if (index === dragIndex.value) {
+            continue;
         }
 
-        fallbackIndex = index;
+        const rect = element.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+        const indexWithoutDraggedItem = index > dragIndex.value ? index - 1 : index;
+
+        if (clientY < midpoint) {
+            return indexWithoutDraggedItem;
+        }
+
+        finalIndex = indexWithoutDraggedItem + 1;
     }
 
-    return fallbackIndex;
+    return Math.min(finalIndex, queue.value.length - 1);
 };
 
 const startPointerDrag = (index, event) => {
@@ -100,7 +141,7 @@ const startPointerDrag = (index, event) => {
 
     window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
 };
 
 const itemStyle = (index) => {
@@ -109,7 +150,7 @@ const itemStyle = (index) => {
     }
 
     return {
-        transform: `translateY(${pointerCurrentY.value - pointerStartY.value}px) scale(0.985)`,
+        transform: `translate3d(0, ${pointerCurrentY.value - pointerStartY.value}px, 0)`,
         zIndex: 3,
     };
 };
@@ -124,7 +165,7 @@ onBeforeUnmount(() => {
     <TransitionGroup ref="listRef" name="queue-reorder" tag="div" class="queue-drawer__list">
         <div
             v-for="(track, index) in queue"
-            :key="`${track.id}-${index}`"
+            :key="track.id"
             :ref="(element) => setItemRef(element, index)"
             class="queue-item"
             :class="{
@@ -169,21 +210,30 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .queue-drawer__list {
+    position: relative;
     display: grid;
     align-content: start;
     gap: 0.8rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
 }
 
 .queue-reorder-move,
 .queue-reorder-enter-active,
 .queue-reorder-leave-active {
-    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
+    transition: transform 0.18s cubic-bezier(0.2, 0.75, 0.25, 1), opacity 0.16s ease;
 }
 
 .queue-reorder-enter-from,
 .queue-reorder-leave-to {
     opacity: 0;
     transform: translateY(10px) scale(0.98);
+}
+
+.queue-reorder-leave-active {
+    position: absolute;
+    inset-inline: 0;
 }
 
 .queue-item {
@@ -194,28 +244,38 @@ onBeforeUnmount(() => {
     gap: 0.8rem;
     padding: 0.75rem;
     border-radius: 18px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
-    will-change: transform;
+    color: #293235;
+    background: #f8f9f8;
+    border: 1px solid #e3e8e6;
+    transition: box-shadow 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
 }
 
 .queue-item--active {
-    border-color: rgba(255, 255, 255, 0.14);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+    border-color: #cbd4d0;
+    background: #edf1ef;
+    box-shadow: inset 3px 0 0 #394346;
+}
+
+.queue-item--active .queue-item__meta strong {
+    color: #253033;
 }
 
 .queue-item--dragging {
-    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 12px 28px rgba(28, 39, 36, 0.16);
     cursor: grabbing;
+    transition: none;
+    will-change: transform;
 }
 
 .queue-item--drop-target::before {
     content: '';
     position: absolute;
-    inset: -4px;
-    border-radius: 22px;
-    border: 1px dashed rgba(255, 255, 255, 0.2);
+    z-index: 2;
+    inset-inline: 10px;
+    top: -7px;
+    height: 3px;
+    border-radius: 999px;
+    background: #657270;
     pointer-events: none;
 }
 
@@ -237,7 +297,7 @@ onBeforeUnmount(() => {
     width: 4px;
     height: 4px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.45);
+    background: rgba(41, 50, 53, 0.42);
 }
 
 .queue-item__select {
@@ -279,7 +339,7 @@ onBeforeUnmount(() => {
 }
 
 .queue-item__duration {
-    color: rgba(255, 255, 255, 0.62);
+    color: var(--text-soft);
     white-space: nowrap;
 }
 

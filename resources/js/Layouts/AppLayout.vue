@@ -16,7 +16,8 @@ const isProfileMenuOpen = ref(false);
 const navigation = [
     { label: 'Главная', href: '/' },
     { label: 'Поиск', href: '/search' },
-    { label: 'Мои треки', href: '/library/tracks', auth: true },
+    { label: 'Моя коллекция', href: '/library/tracks', auth: true },
+    { label: 'Парсинг', href: '/tools/parsing', auth: true },
 ];
 
 const visibleNavigation = computed(() => navigation.filter((item) => !item.auth || user.value));
@@ -70,7 +71,7 @@ watch(currentUrl, () => {
                         <span class="brand__badge">♫</span>
                         <span class="brand__text">
                             <strong>{{ appName }}</strong>
-                            <small>Ваша музыка в одном месте</small>
+                            <small>музыка рядом</small>
                         </span>
                     </Link>
 
@@ -86,19 +87,15 @@ watch(currentUrl, () => {
                         </Link>
                     </nav>
 
-                    <SearchBox :initial-query="page.props.term ?? ''" class="site-search site-search--desktop" />
+                    <SearchBox :initial-query="page.props.term ?? ''" compact class="site-search site-search--desktop" />
 
                     <div class="header-actions header-actions--desktop">
                         <template v-if="user">
                             <div class="profile-menu" :class="{ 'profile-menu--open': isProfileMenuOpen }">
                                 <button class="profile-menu__trigger" type="button" @click="toggleProfileMenu">
-                                    <div class="user-chip">
-                                        <span class="user-chip__avatar">{{ user.name.slice(0, 1).toUpperCase() }}</span>
-                                        <div class="user-chip__meta">
-                                            <strong>{{ user.name }}</strong>
-                                            <small>{{ user.email }}</small>
-                                        </div>
-                                    </div>
+                                    <span class="user-chip__avatar" :aria-label="`Профиль: ${user.name}`">
+                                        {{ user.name.slice(0, 1).toUpperCase() }}
+                                    </span>
                                     <span class="profile-menu__caret" aria-hidden="true">▾</span>
                                 </button>
 

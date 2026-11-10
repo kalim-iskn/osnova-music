@@ -35,7 +35,9 @@ class Artist extends Model
 
     public function creditedTracks(): BelongsToMany
     {
-        return $this->belongsToMany(Track::class, 'artist_track')->withTimestamps();
+        return $this->belongsToMany(Track::class, 'artist_track')
+            ->withPivot('credit_role', 'credit_position')
+            ->withTimestamps();
     }
 
     public function creditedAlbums(): BelongsToMany

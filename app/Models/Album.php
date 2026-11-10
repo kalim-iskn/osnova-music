@@ -21,6 +21,7 @@ class Album extends Model
         'slug',
         'cover_image_url',
         'release_date',
+        'release_date_components',
         'genius_id',
     ];
 
@@ -28,6 +29,7 @@ class Album extends Model
     {
         return [
             'release_date' => 'date',
+            'release_date_components' => 'array',
             'genius_id' => 'integer',
         ];
     }
@@ -40,10 +42,10 @@ class Album extends Model
     public function tracks(): BelongsToMany
     {
         return $this->belongsToMany(Track::class, 'album_track')
-            ->withPivot('is_primary')
+            ->withPivot('is_primary', 'track_number')
             ->withTimestamps()
             ->orderByPivotDesc('is_primary')
-            ->orderBy('track_number')
+            ->orderByRaw('album_track.track_number IS NULL, album_track.track_number ASC')
             ->orderBy('tracks.id');
     }
 

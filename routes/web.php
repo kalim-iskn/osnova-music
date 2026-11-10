@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\LibraryController;
+use App\Http\Controllers\ParsingStatusController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\TrackController;
 use App\Http\Controllers\TrackGeniusController;
@@ -26,6 +27,11 @@ Route::get('/tracks/{track}', [TrackController::class, 'show'])->name('tracks.sh
 Route::get('/tracks/{track}/genius', TrackGeniusController::class)->name('tracks.genius');
 Route::get('/tracks/{track}/stream', TrackStreamController::class)->name('tracks.stream');
 Route::post('/tracks/{track}/play', TrackPlayController::class)->name('tracks.play');
+Route::get('/tools/parsing', [ParsingStatusController::class, 'index'])->name('parsing.index');
+Route::get('/tools/parsing/status', [ParsingStatusController::class, 'status'])->name('parsing.status');
+Route::post('/tools/parsing/artist', [ParsingStatusController::class, 'enqueueArtist'])->name('parsing.artist');
+Route::post('/tools/parsing/artist-list', [ParsingStatusController::class, 'enqueueListing'])->name('parsing.artist-list');
+Route::delete('/tools/parsing/tasks/{task}', [ParsingStatusController::class, 'cancelTask'])->name('parsing.task.cancel');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/register', [RegisteredUserController::class, 'create'])->name('register');

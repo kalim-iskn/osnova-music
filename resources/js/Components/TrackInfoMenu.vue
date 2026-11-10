@@ -53,16 +53,16 @@ defineProps({
     width: 2.5rem;
     height: 2.5rem;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.86);
+    border: 1px solid #e2e7e5;
+    background: #f3f5f4;
+    color: #435053;
     cursor: pointer;
     transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
 }
 
 .track-info-menu__button:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.16);
+    background: #e8edeb;
+    border-color: #d8dfdc;
     transform: translateY(-1px);
 }
 
@@ -82,10 +82,10 @@ defineProps({
     min-width: 230px;
     padding: 0.45rem;
     border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(17, 18, 22, 0.98);
-    box-shadow: 0 20px 44px rgba(0, 0, 0, 0.34);
-    backdrop-filter: blur(14px);
+    border: 1px solid #e1e6e4;
+    color: #30393b;
+    background: #fff;
+    box-shadow: 0 16px 36px rgba(30, 42, 40, 0.13);
 }
 
 .track-info-menu__dropdown--right {
@@ -106,6 +106,6 @@ defineProps({
 }
 
 .track-info-menu__item:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: #f0f3f2;
 }
 </style>

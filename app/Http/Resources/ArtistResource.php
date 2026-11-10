@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use App\Support\ArtworkUrl;
 
 /** @mixin \App\Models\Artist */
 class ArtistResource extends JsonResource
@@ -14,7 +15,7 @@ class ArtistResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'slug' => $this->slug,
-            'image_url' => $this->image_url ?: asset('artist-placeholder.svg'),
+            'image_url' => ArtworkUrl::usable($this->image_url) ?: asset('artist-placeholder.svg'),
             'genius_id' => $this->genius_id,
             'description_preview' => $this->description_preview,
             'tracks_count' => (int) ($this->tracks_count ?? 0),

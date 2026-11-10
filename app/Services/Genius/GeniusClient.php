@@ -2,7 +2,12 @@
 
 namespace App\Services\Genius;
 
+use GuzzleHttp\Cookie\CookieJar;
+use GuzzleHttp\Cookie\SetCookie;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
@@ -12,11 +17,13 @@ use RuntimeException;
 
 class GeniusClient
 {
+    private const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36';
+
+    private const COOKIE_JAR_CACHE_TTL = 2592000;
+
     private string $baseUrl = 'https://genius.com/api';
 
     private int $timeout = 20;
-
-    private int $cacheTtl = 86400;
 
     private int $songsPerPage = 50;
 
@@ -26,18 +33,47 @@ class GeniusClient
 
     private ?string $accessToken = null;
 
+    private CookieJar $cookieJar;
+
     private string $cacheVersion = '20260330-4';
 
     private int $retryTimes = 4;
 
     private int $retrySleepMs = 1500;
 
+    private int $detailConcurrency = 12;
+
+    private int $albumTrackConcurrency = 6;
+
+    private int $detailTimeout = 10;
+
+    private int $cacheTtl = 3600;
+
     private string $logChannel = 'genius_matching';
+
+    /** @var array<string, int|string> */
+    private array $logContext = [];
 
     /**
      * @var array<string, array<string, mixed>>
      */
     private array $runtimeCache = [];
+
+    /** @var array<int, string> */
+    private array $runtimeSearchCacheKeys = [];
+
+    /**
+     * @var array<string, string>
+     */
+    private array $runtimeFailures = [];
+
+    /** @var array{requests:int,retries:int,duration_ms:int,groups:array<string,array{requests:int,retries:int,duration_ms:int,errors:int,statuses:array<string,int>}>} */
+    private array $requestMetrics = [
+        'requests' => 0,
+        'retries' => 0,
+        'duration_ms' => 0,
+        'groups' => [],
+    ];
 
     /**
      * @var array<string, array<int, int>>
@@ -48,15 +84,45 @@ class GeniusClient
     {
         $this->baseUrl = rtrim((string) config('services.genius.base_url', 'https://genius.com/api'), '/');
         $this->timeout = max(5, (int) config('services.genius.timeout', 20));
-        $this->cacheTtl = max(60, (int) config('services.genius.cache_ttl', 86400));
         $this->songsPerPage = max(10, (int) config('services.genius.songs_per_page', 50));
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
         $this->accessToken = config('services.genius.access_token');
         $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-4');
+        $this->cookieJar = $this->createCookieJar(trim((string) config('services.genius.cookie', '')));
         $this->retryTimes = max(1, (int) config('services.genius.retry_times', 4));
         $this->retrySleepMs = max(250, (int) config('services.genius.retry_sleep_ms', 1500));
+        $this->detailConcurrency = max(1, min(16, (int) config('services.genius.detail_concurrency', 12)));
+        $this->albumTrackConcurrency = max(1, min(8, (int) config('services.genius.album_track_concurrency', 6)));
+        $this->detailTimeout = max(5, (int) config('services.genius.detail_timeout', 10));
+        $this->cacheTtl = max(0, (int) config('services.genius.cache_ttl', 3600));
         $this->logChannel = (string) config('services.genius.log_channel', 'genius_matching');
+    }
+
+    public function resetMetrics(): void
+    {
+        $this->requestMetrics = ['requests' => 0, 'retries' => 0, 'duration_ms' => 0, 'groups' => []];
+    }
+
+    public function beginRun(): void
+    {
+        $this->runtimeCache = [];
+        $this->runtimeSearchCacheKeys = [];
+        $this->runtimeFailures = [];
+        $this->runtimeAlbumTrackNumbersCache = [];
+        $this->resetMetrics();
+    }
+
+    /** @return array{requests:int,retries:int,duration_ms:int,groups:array<string,array{requests:int,retries:int,duration_ms:int,errors:int,statuses:array<string,int>}>} */
+    public function metrics(): array
+    {
+        return $this->requestMetrics;
+    }
+
+    /** @param array<string, int|string> $context */
+    public function setLogContext(array $context): void
+    {
+        $this->logContext = $context;
     }
 
     /**
@@ -104,6 +170,13 @@ class GeniusClient
             'q' => $query,
         ], 'search-song:' . md5($query), allowFailure: true);
 
+        return $this->songSearchResults($payload);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function songSearchResults(array $payload): array
+    {
+
         $hits = collect((array) Arr::get($payload, 'response.hits', []))
             ->filter(fn ($hit) => is_array($hit))
             ->values();
@@ -124,6 +197,38 @@ class GeniusClient
             ->all();
     }
 
+    /** Keep only the song summaries used by matching in the cross-run cache. */
+    private function compactSongSearchPayload(array $payload): array
+    {
+        return [
+            'response' => [
+                'hits' => array_map(
+                    static fn (array $song): array => ['result' => $song],
+                    $this->songSearchResults($payload),
+                ),
+            ],
+        ];
+    }
+
+    /** Bound per-artist search-response memory; the service also caches merged summaries. */
+    private function rememberRuntimeSearchPayload(string $key, array $payload): void
+    {
+        $this->runtimeSearchCacheKeys = array_values(array_filter(
+            $this->runtimeSearchCacheKeys,
+            static fn (string $cachedKey): bool => $cachedKey !== $key,
+        ));
+        $this->runtimeSearchCacheKeys[] = $key;
+
+        $this->runtimeCache[$key] = $payload;
+
+        while (count($this->runtimeSearchCacheKeys) > 256) {
+            $oldestKey = array_shift($this->runtimeSearchCacheKeys);
+            if (is_string($oldestKey)) {
+                unset($this->runtimeCache[$oldestKey]);
+            }
+        }
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -132,6 +237,173 @@ class GeniusClient
         $payload = $this->get('songs/' . $geniusId, [], 'song:' . $geniusId, allowFailure: true);
 
         return Arr::get($payload, 'response.song');
+    }
+
+    /**
+     * @param  int[]  $songIds
+     * @return array<int, array<string, mixed>|null>
+     */
+    public function songDetails(array $songIds): array
+    {
+        $startedAt = hrtime(true);
+        $songs = [];
+        $missing = [];
+        $cacheHitCount = 0;
+        $failedCacheHitCount = 0;
+        $failedCount = 0;
+
+        if ((new \ReflectionMethod($this, 'song'))->getDeclaringClass()->getName() !== self::class) {
+            foreach (array_unique(array_map('intval', $songIds)) as $songId) {
+                if ($songId > 0) {
+                    $songs[$songId] = $this->song($songId);
+                }
+            }
+
+            return $songs;
+        }
+
+        foreach (array_unique(array_map('intval', $songIds)) as $songId) {
+            if ($songId <= 0) {
+                continue;
+            }
+
+            $cacheKey = $this->cacheKey('song:' . $songId);
+
+            if (array_key_exists($cacheKey, $this->runtimeFailures)) {
+                $songs[$songId] = null;
+                $failedCacheHitCount++;
+                $failedCount++;
+
+                continue;
+            }
+
+            if (array_key_exists($cacheKey, $this->runtimeCache)) {
+                $songs[$songId] = Arr::get($this->runtimeCache[$cacheKey], 'response.song');
+                $cacheHitCount++;
+
+                continue;
+            }
+
+            $missing[$songId] = $cacheKey;
+        }
+
+        foreach (array_chunk(array_keys($missing), 48) as $songIdChunk) {
+            $chunkStartedAt = hrtime(true);
+            $attemptCounts = [];
+            try {
+                $responses = Http::pool(function (Pool $pool) use ($songIdChunk, &$attemptCounts): void {
+                    foreach ($songIdChunk as $songId) {
+                        $url = $this->baseUrl . '/songs/' . $songId;
+                        $attemptCounts[$songId] = 0;
+                        $request = $pool->as((string) $songId)
+                            ->acceptJson()
+                            ->timeout($this->detailTimeout)
+                            ->retry(
+                                $this->retryTimes,
+                                $this->retrySleepMs,
+                                fn (\Throwable $exception): bool => $this->shouldRetryRequest($exception),
+                                throw: false,
+                            )
+                            ->withHeaders($this->geniusHeaders())
+                            ->withOptions(['cookies' => $this->cookieJar])
+                            ->withRequestMiddleware(function ($request) use (&$attemptCounts, $songId) {
+                                $attemptCounts[$songId]++;
+
+                                return $request;
+                            });
+
+                        if ($this->accessToken) {
+                            $request = $request->withToken($this->accessToken);
+                        }
+
+                        $request->get($url);
+                    }
+                }, $this->detailConcurrency);
+            } finally {
+                $this->persistCookieJar();
+            }
+
+            $batchDurationMs = (int) round((hrtime(true) - $chunkStartedAt) / 1_000_000);
+            $this->requestMetrics['duration_ms'] += $batchDurationMs;
+            $this->requestMetrics['groups']['song_detail'] ??= [
+                'requests' => 0,
+                'retries' => 0,
+                'duration_ms' => 0,
+                'errors' => 0,
+                'statuses' => [],
+            ];
+            $this->requestMetrics['groups']['song_detail']['duration_ms'] =
+                ($this->requestMetrics['groups']['song_detail']['duration_ms'] ?? 0) + $batchDurationMs;
+
+            foreach ($songIdChunk as $songId) {
+                $cacheKey = $missing[$songId];
+                $response = $responses[(string) $songId] ?? null;
+
+                if ($response instanceof \Throwable) {
+                    $this->runtimeFailures[$cacheKey] = $response->getMessage();
+                    $this->recordRequestMetric('songs/' . $songId, 'exception', 0, max(0, ($attemptCounts[$songId] ?? 1) - 1));
+                    $this->httpLog('warning', 'Genius song detail request failed.', [
+                        'path' => 'songs/' . $songId,
+                        'exception' => $response->getMessage(),
+                    ]);
+                    $songs[$songId] = null;
+                    $failedCount++;
+
+                    continue;
+                }
+
+                if (! $response instanceof Response) {
+                    $this->runtimeFailures[$cacheKey] = 'No HTTP response was returned.';
+                    $this->recordRequestMetric('songs/' . $songId, 'exception', 0, max(0, ($attemptCounts[$songId] ?? 1) - 1));
+                    $songs[$songId] = null;
+                    $failedCount++;
+
+                    continue;
+                }
+
+                if ($response->status() === 404) {
+                    $this->recordRequestMetric('songs/' . $songId, 404, 0, max(0, ($attemptCounts[$songId] ?? 1) - 1));
+                    $payload = [];
+                } elseif (! $response->successful()) {
+                    $this->recordRequestMetric('songs/' . $songId, $response->status(), 0, max(0, ($attemptCounts[$songId] ?? 1) - 1));
+                    $this->runtimeFailures[$cacheKey] = sprintf(
+                        'Genius API вернул %d для songs/%d',
+                        $response->status(),
+                        $songId,
+                    );
+                    $this->httpLog('warning', 'Genius API request failed.', [
+                        'path' => 'songs/' . $songId,
+                        'query' => [],
+                        'status' => $response->status(),
+                        'allow_failure' => true,
+                        'body_preview' => mb_substr((string) $response->body(), 0, 500),
+                    ]);
+                    $songs[$songId] = null;
+                    $failedCount++;
+
+                    continue;
+                } else {
+                    $this->recordRequestMetric('songs/' . $songId, $response->status(), 0, max(0, ($attemptCounts[$songId] ?? 1) - 1));
+                    $responsePayload = $response->json();
+                    $payload = is_array($responsePayload) ? $this->sanitizePayload($responsePayload) : [];
+                }
+
+                $this->runtimeCache[$cacheKey] = $payload;
+                $songs[$songId] = Arr::get($payload, 'response.song');
+            }
+        }
+
+        $this->httpLog('info', 'Genius song details batch completed.', [
+            'requested_count' => count(array_unique(array_filter(array_map('intval', $songIds), fn (int $songId): bool => $songId > 0))),
+            'cached_count' => $cacheHitCount,
+            'failed_cached_count' => $failedCacheHitCount,
+            'network_count' => count($missing),
+            'failed_count' => $failedCount,
+            'concurrency' => $this->detailConcurrency,
+            'duration_ms' => (int) round((hrtime(true) - $startedAt) / 1_000_000),
+        ]);
+
+        return $songs;
     }
 
     /**
@@ -186,6 +458,213 @@ class GeniusClient
     }
 
     /**
+     * Fetch album tracklists in bounded concurrent page batches.
+     *
+     * @param  int[]  $albumIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    public function albumTracksMany(array $albumIds): array
+    {
+        $albumIds = collect($albumIds)
+            ->map(fn ($albumId): int => (int) $albumId)
+            ->filter(fn (int $albumId): bool => $albumId > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($albumIds === []) {
+            return [];
+        }
+
+        // Preserve injected/mock client behavior in tests and integrations that
+        // specialize the single-album API method.
+        if ((new \ReflectionMethod($this, 'albumTracks'))->getDeclaringClass()->getName() !== self::class) {
+            $result = [];
+
+            foreach ($albumIds as $albumId) {
+                $result[$albumId] = $this->albumTracks($albumId);
+            }
+
+            return $result;
+        }
+
+        $startedAt = hrtime(true);
+        $tracksByAlbum = array_fill_keys($albumIds, []);
+        $activeAlbumIds = $albumIds;
+
+        for ($page = 1; $page <= $this->maxPages && $activeAlbumIds !== []; $page++) {
+            $payloads = [];
+            $missing = [];
+
+            foreach ($activeAlbumIds as $albumId) {
+                $key = $this->cacheKey('album-tracks:' . $albumId . ':' . $page . ':per:' . $this->songsPerPage);
+
+                if (array_key_exists($key, $this->runtimeCache)) {
+                    $payloads[$albumId] = $this->runtimeCache[$key];
+                } elseif (! array_key_exists($key, $this->runtimeFailures)) {
+                    $missing[$albumId] = $key;
+                }
+            }
+
+            foreach (array_chunk(array_keys($missing), $this->albumTrackConcurrency) as $albumIdChunk) {
+                $chunkStartedAt = hrtime(true);
+                $attemptCounts = [];
+
+                try {
+                    $responses = Http::pool(function (Pool $pool) use ($albumIdChunk, $page, &$attemptCounts): void {
+                        foreach ($albumIdChunk as $albumId) {
+                            $key = $albumId . ':' . $page;
+                            $attemptCounts[$key] = 0;
+                            $request = $pool->as($key)
+                                ->acceptJson()
+                                ->timeout($this->timeout)
+                                ->retry(
+                                    $this->retryTimes,
+                                    $this->retrySleepMs,
+                                    fn (\Throwable $exception): bool => $this->shouldRetryRequest($exception),
+                                    throw: false,
+                                )
+                                ->withHeaders($this->geniusHeaders())
+                                ->withOptions(['cookies' => $this->cookieJar])
+                                ->withRequestMiddleware(function ($request) use (&$attemptCounts, $key) {
+                                    $attemptCounts[$key]++;
+
+                                    return $request;
+                                });
+
+                            if ($this->accessToken) {
+                                $request = $request->withToken($this->accessToken);
+                            }
+
+                            $request->get($this->baseUrl . '/albums/' . $albumId . '/tracks', [
+                                'page' => $page,
+                                'per_page' => $this->songsPerPage,
+                            ]);
+                        }
+                    }, $this->albumTrackConcurrency);
+                } finally {
+                    $this->persistCookieJar();
+                }
+
+                $batchDurationMs = (int) round((hrtime(true) - $chunkStartedAt) / 1_000_000);
+                $this->requestMetrics['duration_ms'] += $batchDurationMs;
+                $this->requestMetrics['groups']['album'] ??= [
+                    'requests' => 0,
+                    'retries' => 0,
+                    'duration_ms' => 0,
+                    'errors' => 0,
+                    'statuses' => [],
+                ];
+                $this->requestMetrics['groups']['album']['duration_ms'] += $batchDurationMs;
+
+                foreach ($albumIdChunk as $albumId) {
+                    $requestKey = $albumId . ':' . $page;
+                    $cacheKey = $missing[$albumId];
+                    $response = $responses[$requestKey] ?? null;
+                    $retries = max(0, ($attemptCounts[$requestKey] ?? 1) - 1);
+                    $path = 'albums/' . $albumId . '/tracks';
+
+                    if ($response instanceof \Throwable || ! $response instanceof Response) {
+                        $message = $response instanceof \Throwable ? $response->getMessage() : 'No HTTP response was returned.';
+                        $this->runtimeFailures[$cacheKey] = $message;
+                        $this->recordRequestMetric($path, 'exception', 0, $retries);
+                        $this->httpLog('warning', 'Genius album tracks batch request failed.', [
+                            'path' => $path,
+                            'query' => ['page' => $page, 'per_page' => $this->songsPerPage],
+                            'exception' => $message,
+                            'retries' => $retries,
+                        ]);
+
+                        continue;
+                    }
+
+                    if ($response->status() === 404) {
+                        $this->recordRequestMetric($path, 404, 0, $retries);
+                        $payloads[$albumId] = $this->runtimeCache[$cacheKey] = [];
+                        continue;
+                    }
+
+                    if (! $response->successful()) {
+                        $message = sprintf('Genius API вернул %d для %s', $response->status(), $path);
+                        $this->runtimeFailures[$cacheKey] = $message;
+                        $this->recordRequestMetric($path, $response->status(), 0, $retries);
+                        $this->httpLog('warning', 'Genius album tracks batch request failed.', [
+                            'path' => $path,
+                            'query' => ['page' => $page, 'per_page' => $this->songsPerPage],
+                            'status' => $response->status(),
+                            'allow_failure' => true,
+                            'retries' => $retries,
+                            'body_preview' => mb_substr((string) $response->body(), 0, 500),
+                        ]);
+
+                        continue;
+                    }
+
+                    $this->recordRequestMetric($path, $response->status(), 0, $retries);
+                    $responsePayload = $response->json();
+                    $payloads[$albumId] = $this->runtimeCache[$cacheKey] = is_array($responsePayload)
+                        ? $this->sanitizePayload($responsePayload)
+                        : [];
+                    $this->httpLog('info', 'Genius album tracks batch request completed.', [
+                        'path' => $path,
+                        'page' => $page,
+                        'status' => $response->status(),
+                        'retries' => $retries,
+                    ]);
+                }
+            }
+
+            $nextActiveAlbumIds = [];
+
+            foreach ($activeAlbumIds as $albumId) {
+                if (! array_key_exists($albumId, $payloads)) {
+                    continue;
+                }
+
+                $payload = $payloads[$albumId];
+                $items = collect((array) Arr::get($payload, 'response.tracks', []))
+                    ->filter(fn ($track) => is_array($track))
+                    ->values()
+                    ->all();
+
+                if ($items === []) {
+                    continue;
+                }
+
+                array_push($tracksByAlbum[$albumId], ...$items);
+
+                if (! empty(Arr::get($payload, 'response.next_page')) && count($items) >= $this->songsPerPage) {
+                    $nextActiveAlbumIds[] = $albumId;
+                }
+            }
+
+            $activeAlbumIds = $nextActiveAlbumIds;
+        }
+
+        $result = [];
+
+        foreach ($tracksByAlbum as $albumId => $tracks) {
+            $result[$albumId] = collect($tracks)
+                ->unique(function (array $track): int {
+                    $song = is_array($track['song'] ?? null) ? $track['song'] : $track;
+
+                    return (int) ($song['id'] ?? 0);
+                })
+                ->values()
+                ->all();
+        }
+
+        $this->httpLog('info', 'Genius album tracks batch completed.', [
+            'album_count' => count($albumIds),
+            'track_count' => array_sum(array_map('count', $result)),
+            'concurrency' => $this->albumTrackConcurrency,
+            'duration_ms' => (int) round((hrtime(true) - $startedAt) / 1_000_000),
+        ]);
+
+        return $result;
+    }
+
+    /**
      * @return array<int, int>
      */
     public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array
@@ -196,7 +675,7 @@ class GeniusClient
             return $this->runtimeAlbumTrackNumbersCache[$runtimeCacheKey];
         }
 
-        $trackNumbers = Cache::remember($this->cacheKey('album-track-numbers:' . $albumId), $this->cacheTtl, function () use ($albumId, $albumUrl): array {
+        $trackNumbers = (function () use ($albumId, $albumUrl): array {
             $apiTracks = $this->albumTracks($albumId);
             $apiMap = [];
 
@@ -234,7 +713,7 @@ class GeniusClient
             }
 
             return $this->extractTrackNumbersFromAlbumHtml($html);
-        });
+        })();
 
         return $this->runtimeAlbumTrackNumbersCache[$runtimeCacheKey] = $trackNumbers;
     }
@@ -319,7 +798,7 @@ class GeniusClient
 
     private function httpLog(string $level, string $message, array $context = []): void
     {
-        Log::channel($this->logChannel)->log($level, $message, $context);
+        Log::channel($this->logChannel)->log($level, $message, array_merge($this->logContext, $context));
     }
 
     /**
@@ -333,15 +812,56 @@ class GeniusClient
             return $this->runtimeCache[$cacheKey];
         }
 
-        File::ensureDirectoryExists(storage_path('framework'));
-        File::ensureDirectoryExists(storage_path('framework/cache'));
-        File::ensureDirectoryExists(storage_path('framework/cache/data'));
+        if (array_key_exists($cacheKey, $this->runtimeFailures)) {
+            throw new RuntimeException($this->runtimeFailures[$cacheKey]);
+        }
 
-        return $this->runtimeCache[$cacheKey] = Cache::remember($cacheKey, $this->cacheTtl, function () use ($path, $query, $allowFailure): array {
-            $response = $this->request()
-                ->get($this->baseUrl . '/' . ltrim($path, '/'), $query);
+        if ($path === 'search' && $this->cacheTtl > 0 && Cache::has($cacheKey)) {
+            $cachedPayload = Cache::get($cacheKey);
+            if (is_array($cachedPayload)) {
+                $this->rememberRuntimeSearchPayload($cacheKey, $cachedPayload);
+
+                return $cachedPayload;
+            }
+        }
+
+        $fetch = function () use ($path, $query, $allowFailure): array {
+            $startedAt = hrtime(true);
+            $attemptCount = 0;
+            $url = $this->baseUrl . '/' . ltrim($path, '/');
+            try {
+                $response = $this->request(function () use (&$attemptCount): void {
+                    $attemptCount++;
+                })->get($url, $query);
+            } catch (\Throwable $exception) {
+                $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
+                $retries = max(0, $attemptCount - 1);
+                $this->recordRequestMetric($path, 'exception', $durationMs, $retries);
+                $this->httpLog('warning', 'Genius API request threw an exception.', [
+                    'path' => $path,
+                    'query' => $query,
+                    'exception' => $exception->getMessage(),
+                    'duration_ms' => $durationMs,
+                    'retries' => $retries,
+                ]);
+
+                throw $exception;
+            } finally {
+                $this->persistCookieJar();
+            }
+
+            $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
+            $retries = max(0, $attemptCount - 1);
+            $this->recordRequestMetric($path, $response->status(), $durationMs, $retries);
 
             if ($allowFailure && $response->status() === 404) {
+                $this->httpLog('info', 'Genius API request completed.', [
+                    'path' => $path,
+                    'status' => 404,
+                    'duration_ms' => $durationMs,
+                    'retries' => $retries,
+                ]);
+
                 return [];
             }
 
@@ -351,6 +871,8 @@ class GeniusClient
                     'query' => $query,
                     'status' => $response->status(),
                     'allow_failure' => $allowFailure,
+                    'duration_ms' => $durationMs,
+                    'retries' => $retries,
                     'body_preview' => mb_substr((string) $response->body(), 0, 500),
                 ]);
 
@@ -361,30 +883,90 @@ class GeniusClient
                 ));
             }
 
+            $this->httpLog('info', 'Genius API request completed.', [
+                'path' => $path,
+                'status' => $response->status(),
+                'duration_ms' => $durationMs,
+                'retries' => $retries,
+            ]);
+
             $payload = $response->json();
 
             return is_array($payload) ? $this->sanitizePayload($payload) : [];
-        });
+        };
+
+        try {
+            $payload = $fetch();
+
+            if ($path === 'search') {
+                $compactPayload = $this->compactSongSearchPayload($payload);
+                $this->rememberRuntimeSearchPayload($cacheKey, $compactPayload);
+                if ($this->cacheTtl > 0 && $payload !== []) {
+                    Cache::put($cacheKey, $compactPayload, $this->cacheTtl);
+                }
+
+                return $payload;
+            }
+
+            return $this->runtimeCache[$cacheKey] = $payload;
+        } catch (\Throwable $exception) {
+            $this->runtimeFailures[$cacheKey] = $exception->getMessage();
+
+            throw $exception;
+        }
     }
 
     private function requestHtml(string $url): ?string
     {
-        $response = Http::timeout($this->timeout)
-            ->retry($this->retryTimes, $this->retrySleepMs, throw: false)
-            ->withHeaders([
-                'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0 Safari/537.36',
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language' => 'ru,en;q=0.9',
-                'Cache-Control' => 'no-cache',
-                'Pragma' => 'no-cache',
-                'Upgrade-Insecure-Requests' => '1',
-            ])
-            ->get($url);
+        $startedAt = hrtime(true);
+        $attemptCount = 0;
+        try {
+            $response = Http::timeout($this->timeout)
+                ->retry(
+                    $this->retryTimes,
+                    $this->retrySleepMs,
+                    fn (\Throwable $exception): bool => $this->shouldRetryRequest($exception),
+                    throw: false,
+                )
+                ->withHeaders($this->geniusHeaders([
+                    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Cache-Control' => 'no-cache',
+                    'Pragma' => 'no-cache',
+                    'Upgrade-Insecure-Requests' => '1',
+                ]))
+                ->withOptions(['cookies' => $this->cookieJar])
+                ->withRequestMiddleware(function ($request) use (&$attemptCount) {
+                    $attemptCount++;
+
+                    return $request;
+                })
+                ->get($url);
+        } catch (\Throwable $exception) {
+            $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
+            $retries = max(0, $attemptCount - 1);
+            $this->recordRequestMetric('albums/html', 'exception', $durationMs, $retries);
+            $this->httpLog('warning', 'Genius HTML request threw an exception.', [
+                'url' => $url,
+                'exception' => $exception->getMessage(),
+                'duration_ms' => $durationMs,
+                'retries' => $retries,
+            ]);
+
+            return null;
+        } finally {
+            $this->persistCookieJar();
+        }
+
+        $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
+        $retries = max(0, $attemptCount - 1);
+        $this->recordRequestMetric('albums/html', $response->status(), $durationMs, $retries);
 
         if (! $response->successful()) {
             $this->httpLog('warning', 'Genius HTML request failed.', [
                 'url' => $url,
                 'status' => $response->status(),
+                'duration_ms' => $durationMs,
+                'retries' => $retries,
                 'body_preview' => mb_substr((string) $response->body(), 0, 500),
             ]);
 
@@ -486,20 +1068,142 @@ class GeniusClient
         return 'genius:' . $this->cacheVersion . ':' . $key;
     }
 
-    private function request(): PendingRequest
+    private function recordRequestMetric(string $path, int|string $status, int $durationMs = 0, int $retries = 0): void
+    {
+        $group = match (true) {
+            str_starts_with($path, 'search/artist') => 'artist_search',
+            $path === 'search' => 'song_search',
+            str_starts_with($path, 'songs/') => 'song_detail',
+            str_starts_with($path, 'albums/') => 'album',
+            str_starts_with($path, 'artists/') => 'artist_catalog',
+            default => 'other',
+        };
+        $statusKey = (string) $status;
+        $this->requestMetrics['requests']++;
+        $this->requestMetrics['retries'] += $retries;
+        $this->requestMetrics['duration_ms'] += $durationMs;
+        $this->requestMetrics['groups'][$group] ??= [
+            'requests' => 0,
+            'retries' => 0,
+            'duration_ms' => 0,
+            'errors' => 0,
+            'statuses' => [],
+        ];
+        $this->requestMetrics['groups'][$group]['requests']++;
+        $this->requestMetrics['groups'][$group]['retries'] += $retries;
+        $this->requestMetrics['groups'][$group]['duration_ms'] += $durationMs;
+        $this->requestMetrics['groups'][$group]['statuses'][$statusKey] =
+            ($this->requestMetrics['groups'][$group]['statuses'][$statusKey] ?? 0) + 1;
+
+        if ($status === 'exception' || (is_int($status) && $status >= 400)) {
+            $this->requestMetrics['groups'][$group]['errors']++;
+        }
+    }
+
+    private function request(?callable $onAttempt = null): PendingRequest
     {
         $request = Http::acceptJson()
             ->timeout($this->timeout)
-            ->retry($this->retryTimes, $this->retrySleepMs, throw: false)
-            ->withHeaders([
-                'User-Agent' => 'WaveFlow Genius Sync/1.0',
-                'Accept-Language' => 'ru,en;q=0.9',
-            ]);
+            ->retry(
+                $this->retryTimes,
+                $this->retrySleepMs,
+                fn (\Throwable $exception): bool => $this->shouldRetryRequest($exception),
+                throw: false,
+            )
+            ->withHeaders($this->geniusHeaders())
+            ->withOptions(['cookies' => $this->cookieJar]);
+
+        if ($onAttempt !== null) {
+            $request = $request->withRequestMiddleware(function ($pendingRequest) use ($onAttempt) {
+                $onAttempt();
+
+                return $pendingRequest;
+            });
+        }
 
         if ($this->accessToken) {
             $request = $request->withToken($this->accessToken);
         }
 
         return $request;
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @return array<string, string>
+     */
+    private function geniusHeaders(array $headers = []): array
+    {
+        return array_merge([
+            'User-Agent' => self::USER_AGENT,
+            'Accept-Language' => 'ru,en;q=0.9',
+        ], $headers);
+    }
+
+    private function createCookieJar(string $seedCookie): CookieJar
+    {
+        File::ensureDirectoryExists(storage_path('framework/cache/data'));
+        $cookieCacheKey = $this->cacheKey('cookie-jar');
+        $seedFingerprintKey = $this->cacheKey('cookie-seed-fingerprint');
+        $cachedCookies = Cache::get($cookieCacheKey, []);
+        $cookieJar = new CookieJar(false, is_array($cachedCookies) ? $cachedCookies : []);
+        $seedCookie = preg_replace('/^\\s*Cookie:\\s*/i', '', $seedCookie) ?? $seedCookie;
+        $seedFingerprint = hash('sha256', $seedCookie);
+        $previousSeedFingerprint = Cache::get($seedFingerprintKey);
+        $shouldApplySeed = $seedCookie !== ''
+            && (count($cookieJar) === 0
+                || ! is_string($previousSeedFingerprint)
+                || ! hash_equals($previousSeedFingerprint, $seedFingerprint));
+
+        if (! $shouldApplySeed) {
+            return $cookieJar;
+        }
+
+        foreach (explode(';', $seedCookie) as $cookiePair) {
+            $cookiePair = trim($cookiePair);
+
+            if ($cookiePair === '' || ! str_contains($cookiePair, '=')) {
+                continue;
+            }
+
+            [$name, $value] = explode('=', $cookiePair, 2);
+            $name = trim($name);
+            $value = trim($value);
+
+            if ($name === '' || $value === '' || str_contains($value, '...')) {
+                continue;
+            }
+
+            $cookieJar->clear('genius.com', '/', $name);
+            $cookieJar->setCookie(new SetCookie([
+                'Domain' => 'genius.com',
+                'Name' => $name,
+                'Value' => $value,
+                'Path' => '/',
+                'Secure' => true,
+                'Discard' => true,
+            ]));
+        }
+
+        Cache::put($seedFingerprintKey, $seedFingerprint, self::COOKIE_JAR_CACHE_TTL);
+
+        return $cookieJar;
+    }
+
+    private function persistCookieJar(): void
+    {
+        Cache::put($this->cacheKey('cookie-jar'), $this->cookieJar->toArray(), self::COOKIE_JAR_CACHE_TTL);
+    }
+
+    private function shouldRetryRequest(\Throwable $exception): bool
+    {
+        if ($exception instanceof RequestException) {
+            $status = $exception->response->status();
+
+            return $exception->response->serverError()
+                || in_array($status, [403, 408, 425, 429], true);
+        }
+
+        return true;
     }
 }

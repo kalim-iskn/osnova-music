@@ -16,7 +16,7 @@ class HomeController extends Controller
     public function __invoke(): Response
     {
         $featuredTracks = Track::query()
-            ->with(['artist', 'artists', 'album'])
+            ->with(['artist', 'artists', 'album', 'albums'])
             ->popular()
             ->limit(12)
             ->get();

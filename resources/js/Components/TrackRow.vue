@@ -23,6 +23,10 @@ const props = defineProps({
         type: Boolean,
         default: true,
     },
+    showTrackNumber: {
+        type: Boolean,
+        default: false,
+    },
 });
 
 const emit = defineEmits(['like-changed']);
@@ -46,7 +50,8 @@ const addToQueue = () => {
 </script>
 
 <template>
-    <article class="track-row" :class="{ 'track-row--active': active }">
+    <article class="track-row" :class="{ 'track-row--active': active, 'track-row--numbered': showTrackNumber }">
+        <span v-if="showTrackNumber" class="track-row__number">{{ track.track_number }}</span>
         <button type="button" class="track-row__cover-button" @click="toggleTrack" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
             <img :src="track.cover_image_url" :alt="track.title" class="track-row__cover">
             <span class="track-row__cover-state">
@@ -70,7 +75,6 @@ const addToQueue = () => {
                         {{ track.album.title }}
                     </Link>
                 </template>
-                <span v-else-if="showAlbum && !track.album">Сингл</span>
             </div>
         </div>
 
@@ -94,6 +98,19 @@ const addToQueue = () => {
     grid-template-columns: 56px minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.9rem;
+    width: 100%;
+    min-width: 0;
+}
+
+.track-row--numbered {
+    grid-template-columns: 2rem 56px minmax(0, 1fr) auto;
+}
+
+.track-row__number {
+    color: var(--text-soft);
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
 }
 
 .track-row__cover-button {
@@ -123,8 +140,10 @@ const addToQueue = () => {
     height: 1.6rem;
     padding: 0 0.4rem;
     border-radius: 999px;
-    background: rgba(10, 12, 16, 0.78);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    background: #293235;
+    border: 0;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
 .track-row__main,
@@ -149,12 +168,12 @@ const addToQueue = () => {
     flex-wrap: wrap;
     align-items: center;
     gap: 0.35rem;
-    color: rgba(255, 255, 255, 0.72);
+    color: var(--text-soft);
     margin-top: 0.3rem;
 }
 
 .track-row__separator {
-    color: rgba(255, 255, 255, 0.38);
+    color: #a2abad;
 }
 
 .track-row__actions {
@@ -173,7 +192,7 @@ const addToQueue = () => {
 
 .track-row__duration {
     white-space: nowrap;
-    color: rgba(255, 255, 255, 0.62);
+    color: var(--text-soft);
 }
 
 @media (max-width: 720px) {
@@ -187,19 +206,70 @@ const addToQueue = () => {
         height: 48px;
     }
 
+    .track-row--numbered {
+        grid-template-columns: 1.5rem 48px minmax(0, 1fr);
+    }
+
     .track-row__actions {
         grid-column: 2;
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
-        gap: 0.75rem;
+        gap: 8px;
         width: 100%;
-        margin-top: 0.75rem;
+        margin-top: 4px;
+    }
+
+    .track-row--numbered .track-row__actions {
+        grid-column: 3;
     }
 
     .track-row__buttons {
         min-width: 0;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
+        gap: 6px;
+    }
+
+    .track-row__queue-button {
+        padding: 8px 10px;
+        font-size: 0.82rem;
+    }
+
+    .track-row__duration {
+        min-width: 34px;
+        text-align: right;
+        font-size: 0.82rem;
+    }
+}
+
+@media (max-width: 420px) {
+    .track-row__actions {
+        grid-template-columns: minmax(0, 1fr) 34px;
+        min-width: 0;
+        gap: 4px;
+    }
+
+    .track-row__buttons {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 36px 36px;
+        gap: 4px;
+    }
+
+    .track-row__buttons :deep(.track-info-menu__button),
+    .track-row__buttons :deep(.icon-button) {
+        width: 36px;
+        min-width: 36px;
+        height: 36px;
+        min-height: 36px;
+        padding: 0;
+    }
+
+    .track-row__queue-button {
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+        padding-inline: 5px;
+        font-size: 0.7rem;
     }
 }
 </style>

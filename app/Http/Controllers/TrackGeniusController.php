@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Track;
 use App\Services\Genius\GeniusClient;
 use App\Services\Genius\GeniusNameMatcher;
+use App\Support\ArtworkUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -50,7 +51,7 @@ class TrackGeniusController extends Controller
                     return [
                         'id' => (int) $artist['id'],
                         'name' => GeniusNameMatcher::storageValue((string) ($artist['name'] ?? '')),
-                        'image_url' => $geniusClient->artistImageUrl($artist),
+                        'image_url' => ArtworkUrl::usable($geniusClient->artistImageUrl($artist)),
                         'description_preview' => $artist['description_preview'] ?? null,
                         'social_links' => array_filter((array) ($artist['social_links'] ?? [])),
                         'url' => $artist['url'] ?? null,
@@ -69,7 +70,10 @@ class TrackGeniusController extends Controller
                     'genres' => GeniusNameMatcher::extractGenres((array) ($song['tags'] ?? [])),
                     'release_date' => $song['release_date'] ?? null,
                     'is_single' => ! is_array($song['album'] ?? null),
-                    'cover_image_url' => $song['song_art_image_url'] ?? $song['header_image_url'] ?? null,
+                    'cover_image_url' => ArtworkUrl::firstUsable(
+                        $song['song_art_image_url'] ?? null,
+                        $song['header_image_url'] ?? null,
+                    ),
                     'url' => $song['url'] ?? null,
                     'album' => is_array($song['album'] ?? null)
                         ? [

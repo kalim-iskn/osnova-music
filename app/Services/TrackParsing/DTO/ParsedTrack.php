@@ -22,6 +22,10 @@ final class ParsedTrack
         public ?int $releaseYear = null,
         public array $genres = [],
         public string $sourceType = self::SOURCE_ARTIST_PAGE,
+        public ?string $audioFileId = null,
+        /** @var array<int, array{title: string, source_type: string, track_number: ?int}> */
+        public array $albumAppearances = [],
+        public ?string $albumCoverImageUrl = null,
     ) {
     }
 }

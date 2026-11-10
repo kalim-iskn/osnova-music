@@ -15,6 +15,12 @@ class Track extends Model
         'title',
         'duration_seconds',
         'audio_url',
+        'muzofond_audio_id',
+        'muzofond_title',
+        'muzofond_album_title',
+        'muzofond_album_appearances',
+        'muzofond_alternate_sources',
+        'audio_version_ambiguous',
         'original_link',
         'audio_hash',
         'release_year',
@@ -36,11 +42,14 @@ class Track extends Model
             'duration_seconds' => 'integer',
             'release_year' => 'integer',
             'genres' => 'array',
+            'muzofond_album_appearances' => 'array',
+            'muzofond_alternate_sources' => 'array',
             'track_number' => 'integer',
             'is_downloaded' => 'boolean',
             'plays_count' => 'integer',
             'genius_id' => 'integer',
             'genius_pageviews' => 'integer',
+            'audio_version_ambiguous' => 'boolean',
         ];
     }
 
@@ -65,13 +74,15 @@ class Track extends Model
     public function albums(): BelongsToMany
     {
         return $this->belongsToMany(Album::class, 'album_track')
-            ->withPivot('is_primary')
+            ->withPivot('is_primary', 'track_number')
             ->withTimestamps();
     }
 
     public function artists(): BelongsToMany
     {
-        return $this->belongsToMany(Artist::class, 'artist_track')->withTimestamps();
+        return $this->belongsToMany(Artist::class, 'artist_track')
+            ->withPivot('credit_role', 'credit_position')
+            ->withTimestamps();
     }
 
     public function likedByUsers(): BelongsToMany

@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\ParseMuzofondArtistJob;
+use App\Models\ParsingRun;
 use App\Services\Genius\GeniusCatalogSyncService;
 use App\Services\TrackParsing\MuzofondTrackParser;
 use Illuminate\Console\Command;
@@ -18,6 +20,8 @@ class ParseTracksCommand extends Command
         {--page-limit=0 : Limit pagination depth for parser pages, 0 = no limit}
         {--debug-matching : Write detailed Genius matching diagnostics into the Laravel log}
         {--debug-parsing : Write detailed Muzofond parsing diagnostics into the Laravel log}
+        {--queue-connection=database : Queue connection for per-artist jobs when parsing artists listings}
+        {--queue-name=tracks-parsing : Queue name for per-artist jobs when parsing artists listings}
         {--dry-run : Parse only, do not save anything}';
 
     protected $description = 'Parse tracks from a remote page and save artists, albums and tracks into the local catalog';
@@ -33,6 +37,8 @@ class ParseTracksCommand extends Command
         $dryRun = (bool) $this->option('dry-run');
         $debugMatching = (bool) $this->option('debug-matching');
         $debugParsing = (bool) $this->option('debug-parsing');
+        $queueConnection = trim((string) $this->option('queue-connection')) ?: 'database';
+        $queueName = trim((string) $this->option('queue-name')) ?: 'tracks-parsing';
 
         if ($debugMatching) {
             $geniusCatalogSyncService->setNeedDebug(true);
@@ -46,6 +52,61 @@ class ParseTracksCommand extends Command
             $this->error('Передан некорректный URL.');
 
             return self::FAILURE;
+        }
+
+        if (! $dryRun && $parserKey === 'muzofond' && $muzofondParser->isArtistsListing($url)) {
+            $dispatchStartedAt = microtime(true);
+            $artistUrls = $muzofondParser->artistUrls($url, $artistLimit);
+
+            if ($artistUrls === []) {
+                $this->warn('Artist listing returned no artist URLs.');
+
+                return self::SUCCESS;
+            }
+
+            $run = ParsingRun::query()->create([
+                'kind' => 'artist_list',
+                'source_url' => $url,
+                'status' => 'queued',
+                'stage' => 'queueing_artists',
+                'options' => ['artist_limit' => $artistLimit, 'page_limit' => $pageLimit],
+                'total_tasks' => count($artistUrls),
+            ]);
+
+            foreach ($artistUrls as $artistUrl) {
+                $task = $run->tasks()->create([
+                    'artist_url' => $artistUrl,
+                    'artist_slug' => rawurldecode((string) basename((string) parse_url($artistUrl, PHP_URL_PATH))),
+                    'status' => 'queued',
+                    'stage' => 'queued',
+                    'page_limit' => $pageLimit,
+                ]);
+
+                ParseMuzofondArtistJob::dispatch($artistUrl, $pageLimit, $debugMatching, $debugParsing, $task->id)
+                    ->onConnection($queueConnection)
+                    ->onQueue($queueName);
+            }
+
+            $run->refreshFromTasks();
+
+            $dispatchDurationMs = (int) round((microtime(true) - $dispatchStartedAt) * 1000);
+
+            $this->info(sprintf('Queued artist jobs: %d', count($artistUrls)));
+            $this->line(sprintf('Parsing status: /tools/parsing (run #%d)', $run->id));
+            $this->line(sprintf('Queue connection: %s | queue: %s', $queueConnection, $queueName));
+
+            Log::info('Queued per-artist muzofond parsing jobs.', [
+                'parser' => $parserKey,
+                'url' => $url,
+                'artist_limit' => $artistLimit,
+                'page_limit' => $pageLimit,
+                'queue_connection' => $queueConnection,
+                'queue_name' => $queueName,
+                'artist_job_count' => count($artistUrls),
+                'duration_ms' => $dispatchDurationMs,
+            ]);
+
+            return self::SUCCESS;
         }
 
         $parseStartedAt = microtime(true);
@@ -108,14 +169,23 @@ class ParseTracksCommand extends Command
                 $matchedTracks += $result['matched_tracks'];
                 $unmatchedTracks += $result['unmatched_tracks'];
 
-                if ($result['genius_matched']) {
+                if ($result['genius_unavailable'] ?? false) {
+                    $this->warn(sprintf(
+                        'Genius недоступен после повторов; Muzofond-треки сохранены. Совпало: %d, без матча: %d.',
+                        $result['matched_tracks'],
+                        $result['unmatched_tracks'],
+                    ));
+                } elseif ($result['genius_matched']) {
                     $this->info(sprintf(
                         'Genius: найдено совпадение, сохранено треков: %d, пропущено без уверенного матча: %d',
                         $result['matched_tracks'],
                         $result['unmatched_tracks'],
                     ));
                 } else {
-                    $this->warn('Genius-матч не найден, сохранение выполнено по текущему muzofond-фоллбеку.');
+                    $this->warn(sprintf(
+                        'Genius-совпадений нет; Muzofond-треки сохранены через fallback: %d.',
+                        count($page->tracks),
+                    ));
                 }
 
                 $this->line(sprintf('Время обработки: %.1f c', $artistDurationMs / 1000));
@@ -131,6 +201,7 @@ class ParseTracksCommand extends Command
                     'matched_tracks' => $result['matched_tracks'],
                     'unmatched_tracks' => $result['unmatched_tracks'],
                     'genius_matched' => $result['genius_matched'],
+                    'genius_unavailable' => $result['genius_unavailable'] ?? false,
                     'duration_ms' => $artistDurationMs,
                 ]);
             } catch (Throwable $exception) {

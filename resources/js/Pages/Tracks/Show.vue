@@ -149,14 +149,14 @@ onMounted(fetchRuntime);
     <section class="section-grid track-page__content-grid">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Описание</span>
-                    <h2>О треке</h2>
-                </div>
+                <h2>О треке</h2>
             </div>
 
             <p v-if="trackDescription" class="track-page__description">
                 {{ trackDescription }}
+            </p>
+            <p v-else-if="track.audio_version_ambiguous" class="track-page__description track-page__description--muted">
+                Точная версия этой записи не подтверждена. Аудиофайл сохранён отдельно от оригинального трека.
             </p>
             <p v-else class="track-page__description track-page__description--muted">
                 Для этого трека пока нет краткого описания.
@@ -177,10 +177,7 @@ onMounted(fetchRuntime);
 
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Исполнители</span>
-                    <h2>Участники трека</h2>
-                </div>
+                <h2>Участники трека</h2>
             </div>
 
             <div class="track-page__artist-grid">
@@ -228,10 +225,7 @@ onMounted(fetchRuntime);
     <section class="section-block">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <div>
-                    <span class="eyebrow">Похожие</span>
-                    <h2>Ещё послушать</h2>
-                </div>
+                <h2>Ещё послушать</h2>
                 <span class="badge">{{ relatedTracks.length }}</span>
             </div>
 
@@ -262,7 +256,7 @@ onMounted(fetchRuntime);
 
 .track-page__hero-body {
     display: grid;
-    gap: 1rem;
+    gap: 0.7rem;
     align-content: start;
     justify-items: start;
     justify-content: start;
@@ -279,6 +273,15 @@ onMounted(fetchRuntime);
     gap: 0.75rem;
 }
 
+.track-page__hero-body h1,
+.track-page__description-row {
+    margin-block: 0;
+}
+
+.track-page__description-row {
+    line-height: 1.45;
+}
+
 .track-page__play-button {
     display: inline-flex;
     align-items: center;
@@ -288,37 +291,35 @@ onMounted(fetchRuntime);
     padding: 0.85rem 1.4rem;
     border: 0;
     border-radius: 999px;
-    background: linear-gradient(135deg, #7c3aed, #ec4899);
+    background: #293235;
     color: #fff;
     font-weight: 700;
     font-size: 0.95rem;
     cursor: pointer;
-    box-shadow: 0 16px 32px rgba(124, 58, 237, 0.24);
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    box-shadow: none;
+    transition: transform 0.18s ease, background-color 0.18s ease;
 }
 
 .track-page__play-button:hover,
 .track-page__play-button:focus-visible {
     transform: translateY(-1px);
-    box-shadow: 0 20px 40px rgba(124, 58, 237, 0.3);
+    background: #171e20;
 }
 
 .track-page__content-grid {
     align-items: start;
 }
 
-.track-page__status {
-    color: rgba(255, 255, 255, 0.7);
-}
+.track-page__status { color: var(--text-soft); }
 
 .track-page__description {
     line-height: 1.7;
-    color: rgba(255, 255, 255, 0.82);
+    color: #4f5b5d;
     text-align: left;
 }
 
 .track-page__description--muted {
-    color: rgba(255, 255, 255, 0.56);
+    color: #899294;
 }
 
 .track-page__artist-grid {
@@ -335,7 +336,7 @@ onMounted(fetchRuntime);
     width: 100%;
     padding: 1rem;
     border-radius: 1.25rem;
-    background: rgba(255, 255, 255, 0.04);
+    background: #f0f3f2;
 }
 
 .track-page__artist-body {

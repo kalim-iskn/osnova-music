@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Artist;
 use App\Services\Genius\GeniusClient;
 use App\Services\Genius\GeniusNameMatcher;
+use App\Support\ArtworkUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -30,7 +31,7 @@ class ArtistGeniusController extends Controller
                     'name' => GeniusNameMatcher::storageValue((string) ($payload['name'] ?? $artist->name)),
                     'description_preview' => $payload['description_preview'] ?? null,
                     'social_links' => array_filter((array) ($payload['social_links'] ?? [])),
-                    'image_url' => $geniusClient->artistImageUrl($payload),
+                    'image_url' => ArtworkUrl::usable($geniusClient->artistImageUrl($payload)),
                     'url' => $payload['url'] ?? null,
                 ],
             ]);

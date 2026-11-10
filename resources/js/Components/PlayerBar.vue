@@ -503,8 +503,8 @@ watch(isMobilePlayerOpen, (isOpen) => {
     bottom: 0;
     height: min(85dvh, 860px);
     border-radius: 28px 28px 0 0;
-    background: linear-gradient(180deg, rgba(14, 19, 33, 0.98) 0%, rgba(7, 11, 20, 0.99) 100%);
-    box-shadow: 0 -24px 80px rgba(0, 0, 0, 0.44);
+    background: #f7f8f7;
+    box-shadow: 0 -18px 45px rgba(30, 42, 40, 0.16);
     overflow: hidden;
     transition: height 0.28s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.28s ease;
 }
@@ -536,7 +536,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
     width: 54px;
     height: 5px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.22);
+    background: #c4cbca;
 }
 
 .mobile-player__scroll {
@@ -583,9 +583,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
     justify-content: center;
 }
 
-.mobile-player__album-link {
-    color: rgba(255, 255, 255, 0.72);
-}
+.mobile-player__album-link { color: var(--text-soft); }
 
 .mobile-player__timeline,
 .mobile-player__controls,
@@ -604,7 +602,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
 .mobile-player__timeline span {
     font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.62);
+    color: var(--text-soft);
 }
 
 .mobile-player__controls {
@@ -637,7 +635,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
 }
 
 .mobile-player__queue-heading p {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-soft);
 }
 
 .mobile-player-fade-enter-active,

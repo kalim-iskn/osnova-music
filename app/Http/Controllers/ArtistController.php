@@ -26,7 +26,7 @@ class ArtistController extends Controller
         $albums = $this->resolveArtistAlbums($artist);
 
         $tracks = $creditedTracksQuery
-            ->with(['artist', 'artists', 'album', 'album.artists'])
+            ->with(['artist', 'artists', 'album', 'album.artists', 'albums', 'albums.artists'])
             ->popular()
             ->paginate(20)
             ->withQueryString();

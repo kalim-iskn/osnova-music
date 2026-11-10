@@ -6,19 +6,24 @@ import PaginationBar from '../../Components/PaginationBar.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { usePlayerStore } from '../../stores/player';
 import { formatCount } from '../../utils/pluralize';
+import { formatAlbumReleaseDate } from '../../utils/releaseDate';
 
 defineOptions({ layout: AppLayout });
 
 const props = defineProps({
     album: Object,
     tracks: [Array, Object],
+    showTrackNumbers: Boolean,
 });
 
 const runtime = ref(null);
 const trackItems = computed(() => Array.isArray(props.tracks) ? props.tracks : props.tracks?.data ?? []);
 const pagination = computed(() => Array.isArray(props.tracks) ? null : props.tracks);
 const albumDescription = computed(() => runtime.value?.album?.description_preview ?? null);
-const displayReleaseDate = computed(() => runtime.value?.album?.release_date ?? props.album.release_date ?? null);
+const displayReleaseDate = computed(() => formatAlbumReleaseDate({
+    release_date: runtime.value?.album?.release_date ?? props.album.release_date,
+    release_date_components: runtime.value?.album?.release_date_components ?? props.album.release_date_components,
+}));
 const albumArtists = computed(() => Array.isArray(props.album?.artists) && props.album.artists.length ? props.album.artists : (props.album?.artist ? [props.album.artist] : []));
 const player = usePlayerStore();
 const firstTrack = computed(() => trackItems.value[0] ?? null);
@@ -94,24 +99,27 @@ onMounted(fetchRuntime);
     </section>
 
     <section class="section-block">
-        <div class="panel-card">
-            <div class="section-heading section-heading--tight">
-                <h2>Треклист</h2>
-                <span class="badge">{{ pagination?.meta?.total ?? trackItems.length }}</span>
-            </div>
-
-            <div class="track-list">
-                <TrackRow
-                    v-for="track in trackItems"
-                    :key="track.id"
-                    :track="track"
-                    :queue="trackItems"
-                    :show-album="false"
-                />
-            </div>
-
-            <PaginationBar :pagination="pagination" />
+        <div class="section-heading section-heading--tight">
+            <h2>Треклист</h2>
+            <span class="badge">{{ pagination?.meta?.total ?? trackItems.length }}</span>
         </div>
+
+        <div class="track-list album-page__tracklist">
+            <TrackRow
+                v-for="track in trackItems"
+                :key="track.id"
+                :track="track"
+                :queue="trackItems"
+                :show-album="false"
+                :show-track-number="showTrackNumbers"
+            />
+        </div>
+
+        <p v-if="!trackItems.length" class="empty-state album-page__empty">
+            В этом альбоме пока нет треков.
+        </p>
+
+        <PaginationBar :pagination="pagination" />
     </section>
 </template>
 
@@ -151,19 +159,19 @@ onMounted(fetchRuntime);
     padding: 0.85rem 1.4rem;
     border: 0;
     border-radius: 999px;
-    background: linear-gradient(135deg, #7c3aed, #ec4899);
+    background: #293235;
     color: #fff;
     font-weight: 700;
     font-size: 0.95rem;
     cursor: pointer;
-    box-shadow: 0 16px 32px rgba(124, 58, 237, 0.24);
-    transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    box-shadow: none;
+    transition: transform 0.18s ease, background-color 0.18s ease, opacity 0.18s ease;
 }
 
 .album-page__play-button:hover:not(:disabled),
 .album-page__play-button:focus-visible:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 20px 40px rgba(124, 58, 237, 0.3);
+    background: #171e20;
 }
 
 .album-page__play-button:disabled {
