@@ -3,6 +3,9 @@ set -e
 
 cd /var/www/html
 
+mkdir -p public/build
+cp -a /opt/waveflow/public-build/. public/build/
+
 if [ ! -f .env ]; then
   cp .env.example .env
 fi

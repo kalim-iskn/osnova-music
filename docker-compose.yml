@@ -1,5 +1,8 @@
+name: waveflow
+
 services:
   app:
+    container_name: waveflow-app
     build:
       context: .
       dockerfile: docker/php/Dockerfile
@@ -16,9 +19,9 @@ services:
       # быстрый vendor для PHP (vendor copy в windows: docker cp work_project_php:/opt/app/vendor ./vendor)
       - vendor_data:/var/www/html/vendor
       - ./docker/supervisor/supervisord.conf:/etc/supervisor.d/supervisord.ini:ro
-      - ./docker/supervisor/supervisord.conf:/etc/supervisor.d/supervisord.ini:ro
 
   db:
+    container_name: waveflow-db
     image: postgres:18-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-waveflow}
@@ -27,7 +30,7 @@ services:
     ports:
       - "${FORWARD_DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-waveflow} -d ${POSTGRES_DB:-waveflow}"]
       interval: 5s
@@ -37,4 +40,8 @@ services:
 
 volumes:
   postgres_data:
+    name: osnova-music_postgres_data
+    external: true
   vendor_data:
+    name: osnova-music_vendor_data
+    external: true

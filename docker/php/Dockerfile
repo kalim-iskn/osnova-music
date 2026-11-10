@@ -42,7 +42,7 @@ RUN apk add --no-cache \
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
-COPY --from=frontend /app/public/build ./public/build
+COPY --from=frontend /app/public/build /opt/waveflow/public-build
 COPY docker/nginx/default.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisor/supervisord.conf /etc/supervisor.d/supervisord.ini
 COPY docker/php/entrypoint.sh /usr/local/bin/entrypoint
