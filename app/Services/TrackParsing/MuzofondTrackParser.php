@@ -1057,7 +1057,9 @@ class MuzofondTrackParser
 
             $genres = array_values(array_unique($genres));
 
-            $meta = $this->extractTrackMetadata($rawTrackTitle, $genres);
+            $meta = $sourceType === ParsedTrack::SOURCE_ALBUM_PAGE && $defaultAlbumTitle !== null
+                ? ['title' => $this->normalizeRawText($rawTrackTitle), 'album' => null, 'year' => null]
+                : $this->extractTrackMetadata($rawTrackTitle, $genres);
             $artistNames = $this->extractArtistNames($rowArtists, $pageArtistName);
 
             if ($meta['title'] === '' || $artistNames === []) {

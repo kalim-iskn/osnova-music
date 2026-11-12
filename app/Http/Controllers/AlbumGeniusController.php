@@ -25,6 +25,17 @@ class AlbumGeniusController extends Controller
                 return response()->json(['album' => null]);
             }
 
+            $dateComponents = is_array($payload['release_date_components'] ?? null)
+                ? $payload['release_date_components']
+                : null;
+            if ($dateComponents !== null && (int) ($dateComponents['year'] ?? 0) <= 0) {
+                $dateComponents = null;
+            }
+            if ($dateComponents === null && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', (string) ($payload['release_date'] ?? ''), $matches) === 1
+                && checkdate((int) $matches[2], (int) $matches[3], (int) $matches[1])) {
+                $dateComponents = ['year' => (int) $matches[1], 'month' => (int) $matches[2], 'day' => (int) $matches[3]];
+            }
+
             return response()->json([
                 'album' => [
                     'id' => (int) ($payload['id'] ?? 0),
@@ -35,6 +46,7 @@ class AlbumGeniusController extends Controller
                         $payload['cover_art_url'] ?? null,
                     ),
                     'release_date' => $payload['release_date_for_display'] ?? $payload['release_date'] ?? null,
+                    'release_date_components' => $dateComponents,
                     'url' => $payload['url'] ?? null,
                 ],
             ]);

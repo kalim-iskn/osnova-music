@@ -59,8 +59,14 @@ class ArtistController extends Controller
             ->concat($creditedAlbums)
             ->unique(fn (Album $album) => $album->id)
             ->sort(function (Album $left, Album $right): int {
-                $leftRelease = $left->release_date ? strtotime((string) $left->release_date) : 0;
-                $rightRelease = $right->release_date ? strtotime((string) $right->release_date) : 0;
+                $key = static function (Album $album): int {
+                    $parts = $album->release_date_components ?? [];
+                    return (int) ($parts['year'] ?? 0) * 10000
+                        + (int) ($parts['month'] ?? 0) * 100
+                        + (int) ($parts['day'] ?? 0);
+                };
+                $leftRelease = $key($left);
+                $rightRelease = $key($right);
 
                 if ($leftRelease !== $rightRelease) {
                     return $rightRelease <=> $leftRelease;

@@ -128,7 +128,19 @@ class RepairTrackGeniusMatchesCommandTest extends TestCase
 
             public function albumTracks(int $albumId): array
             {
-                return [];
+                return match ($albumId) {
+                    7101 => [
+                        ['number' => 1, 'song' => ['id' => 4139100, 'title' => 'Ели мясо мужики']],
+                        ['number' => 2, 'song' => ['id' => 4621957, 'title' => 'Лесник']],
+                    ],
+                    7102 => [
+                        ['number' => 1, 'song' => ['id' => 8997469, 'title' => 'Лесник (Из сериала «Король и Шут»)']],
+                    ],
+                    7103 => [
+                        ['number' => 1, 'song' => ['id' => 9014645, 'title' => 'Ели мясо мужики (Live)']],
+                    ],
+                    default => [],
+                };
             }
 
             public function albumTrackNumbers(int $albumId, ?string $albumUrl = null): array

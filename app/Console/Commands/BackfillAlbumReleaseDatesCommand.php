@@ -18,7 +18,6 @@ class BackfillAlbumReleaseDatesCommand extends Command
         $query = Album::query()
             ->with('artist')
             ->whereNotNull('genius_id')
-            ->whereNull('release_date')
             ->whereNull('release_date_components');
 
         if ($slug = trim((string) $this->option('artist'))) {
@@ -57,6 +56,11 @@ class BackfillAlbumReleaseDatesCommand extends Command
                     : null;
                 $date = $this->completeDate($summary, $components);
 
+                if ($components === null && $date !== null) {
+                    [$year, $month, $day] = array_map('intval', explode('-', $date));
+                    $components = compact('year', 'month', 'day');
+                }
+
                 if ($date === null && $components === null) {
                     continue;
                 }
@@ -65,7 +69,6 @@ class BackfillAlbumReleaseDatesCommand extends Command
 
                 if (! $this->option('dry-run')) {
                     $album->forceFill([
-                        'release_date' => $date,
                         'release_date_components' => $components,
                     ])->save();
                 }

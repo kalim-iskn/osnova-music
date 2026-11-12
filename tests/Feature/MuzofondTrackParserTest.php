@@ -11,6 +11,23 @@ use Tests\TestCase;
 
 class MuzofondTrackParserTest extends TestCase
 {
+    public function test_real_album_pages_keep_parenthesized_song_titles_and_page_album(): void
+    {
+        $cases = [
+            ['muzofond-alisher.html', 'Morgenshtern', '5545961', 'ДОМ (Лондон, Прага, Ницца)', 'Alisher', 2, 154],
+            ['muzofond-basta-5-part-2.html', 'Баста', '2651337', 'Выпускной (Медлячок)', 'Баста 5. Часть 2', 3, 335],
+        ];
+        foreach ($cases as [$file, $artist, $audioId, $title, $album, $position, $duration]) {
+            $tracks = $this->extractAlbumTracks(file_get_contents(base_path('tests/Fixtures/'.$file)), $artist);
+            $track = collect($tracks)->first(fn (ParsedTrack $track) => $track->audioFileId === $audioId);
+            $this->assertNotNull($track, $file);
+            $this->assertSame($title, $track->title);
+            $this->assertSame($album, $track->albumTitle);
+            $this->assertSame($position, $track->trackNumber);
+            $this->assertSame($duration, $track->durationSeconds);
+        }
+    }
+
     public function test_extract_tracks_from_artist_page_ignores_duplicate_title_metadata_as_album(): void
     {
         $tracks = $this->extractTracks($this->trackHtml('Mayot', 'РЎРЅРµРі (РЎРЅРµРі 2019)', '/snow.mp3', '03:06'), 'Mayot');

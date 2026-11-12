@@ -255,6 +255,52 @@ class GeniusNameMatcher
         return $title;
     }
 
+    /** @return string[] Canonical title forms, including a clearly marked translation suffix. */
+    public static function comparisonTrackTitles(string $value): array
+    {
+        $forms = [$value];
+        $candidate = self::cleanTextValue($value);
+        $candidate = strtr($candidate, ['[' => '(', ']' => ')', '{' => '(', '}' => ')']);
+
+        while (preg_match('/^(?P<base>.+?)\s*[\(](?P<meta>[^()]+)[\)]\s*$/u', $candidate, $matches) === 1) {
+            $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
+            $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
+
+            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)
+                || ! self::looksLikeTranslationSuffix($base, $meta)) {
+                break;
+            }
+
+            $forms[] = $base;
+            $forms[] = $meta;
+            $candidate = $base;
+        }
+
+        return collect($forms)
+            ->map(fn (string $form): string => self::canonicalTrack($form))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return string[] Explicit version qualifiers, never arbitrary words inside a title. */
+    public static function explicitVersionQualifiers(string $value): array
+    {
+        $qualifiers = [];
+        if (preg_match_all('/[\(\[]([^\)\]]+)[\)\]]/u', $value, $matches)) {
+            array_push($qualifiers, ...$matches[1]);
+        }
+        if (preg_match('/\s[-–—]\s([^\r\n]+)$/u', $value, $suffix) === 1) {
+            $qualifiers[] = (string) $suffix[1];
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            fn (string $qualifier): string => self::cleanWhitespace($qualifier),
+            $qualifiers,
+        ))));
+    }
+
     /**
      * @return string[]
      */
@@ -331,6 +377,10 @@ class GeniusNameMatcher
 
     public static function canonicalTrack(string $value): string
     {
+        $symbol = trim($value);
+        if (mb_strlen($symbol) === 1 && preg_match('/^[^\p{L}\p{N}\s]$/u', $symbol) === 1) {
+            return $symbol;
+        }
         $value = self::storageValue($value);
         $value = preg_replace('/\b(snippet|romanized|romanization|translation|translated|lyrics)\b/iu', '', $value) ?? $value;
         $value = preg_replace('/\s*[\(\[\{].*?[\)\]\}]/u', '', $value) ?? $value;
@@ -997,7 +1047,7 @@ class GeniusNameMatcher
             return false;
         }
 
-        return preg_match('/\b(?:live|remix(?:es)?|mix(?:es)?|instrumental|karaoke|demo|acoustic|radio edit|edit|deluxe|expanded|bonus|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original mix|extended|club mix|clean|explicit|prod|cover|ring(?: ?tone)?|caller tune|na zvonok)\b/iu', $normalized) === 1;
+        return preg_match('/^(?:live(?:\s+version|\s+(?:at|in|from|on|recorded)\s+.+)?|concert(?:\s+version|\s+(?:at|in)\s+.+)?|remix(?:es)?(?:\s+by\s+.+)?|(?:.+\s+)?(?:remix|remiks|микс|mix)|instrumental(?:\s+version)?|karaoke(?:\s+version)?|demo(?:\s+version)?|acoustic(?:\s+version)?|radio\s+edit|edit|deluxe(?:\s+edition)?|expanded(?:\s+edition)?|bonus(?:\s+edition)?|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original\s+mix|extended(?:\s+mix|\s+version)?|club\s+mix|clean|explicit|prod|cover|ring(?: ?tone)?|caller\s+tune|na\s+zvonok)$/iu', $normalized) === 1;
     }
 
     private static function looksLikeMojibake(string $value): bool

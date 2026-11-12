@@ -10,6 +10,29 @@ use Tests\TestCase;
 
 class GeniusClientTest extends TestCase
 {
+    public function test_apple_player_duration_requires_a_matching_real_apple_track_and_is_cached(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        $html = '<apple-music-player song_id="1783221" is_matched="true" '
+            . 'preview_track="{&quot;apple_id&quot;:&quot;1104137649&quot;,&quot;duration&quot;:147.036}" '
+            . 'apple_music_tracks="[{&quot;apple_id&quot;:&quot;1104137649&quot;,&quot;duration&quot;:147.036}]" '
+            . 'unmatched_placeholder_track="{&quot;duration&quot;:0}"></apple-music-player>';
+        Http::fake(['https://genius.test/songs/1783221/apple_music_player*' => Http::response($html)]);
+        $client = new GeniusClient();
+        $this->assertSame(147.036, $client->songAppleMusicDurationSeconds(1783221));
+        $this->assertSame(147.036, $client->songAppleMusicDurationSeconds(1783221));
+        Http::assertSentCount(1);
+    }
+
+    public function test_apple_player_placeholder_is_not_a_duration(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        Http::fake(['https://genius.test/songs/123/apple_music_player*' => Http::response(
+            '<apple-music-player song_id="123" is_matched="false" unmatched_placeholder_track="{&quot;duration&quot;:0}"></apple-music-player>'
+        )]);
+        $this->assertNull((new GeniusClient())->songAppleMusicDurationSeconds(123));
+    }
+
     public function test_song_search_results_are_reused_from_compact_cache_across_runs(): void
     {
         config()->set('services.genius.base_url', 'https://genius.test/api');

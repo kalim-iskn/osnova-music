@@ -40,8 +40,13 @@ services:
 
 volumes:
   postgres_data:
-    name: osnova-music_postgres_data
-    external: true
+    name: waveflow_postgres_data
   vendor_data:
-    name: osnova-music_vendor_data
-    external: true
+    name: waveflow_vendor_data
+
+networks:
+  default:
+    name: waveflow_default
+    ipam:
+      config:
+        - subnet: 10.254.254.0/24

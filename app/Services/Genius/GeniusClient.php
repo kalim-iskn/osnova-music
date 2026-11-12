@@ -80,6 +80,12 @@ class GeniusClient
      */
     private array $runtimeAlbumTrackNumbersCache = [];
 
+    /** @var array<int, AlbumTracklistResult> */
+    private array $albumTracklistResults = [];
+
+    /** @var array<int, float|null> */
+    private array $appleMusicDurations = [];
+
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('services.genius.base_url', 'https://genius.com/api'), '/');
@@ -110,7 +116,62 @@ class GeniusClient
         $this->runtimeSearchCacheKeys = [];
         $this->runtimeFailures = [];
         $this->runtimeAlbumTrackNumbersCache = [];
+        $this->albumTracklistResults = [];
+        $this->appleMusicDurations = [];
         $this->resetMetrics();
+    }
+
+    public function songAppleMusicDurationSeconds(int $songId): ?float
+    {
+        if ($songId <= 0) {
+            return null;
+        }
+        if (array_key_exists($songId, $this->appleMusicDurations)) {
+            return $this->appleMusicDurations[$songId];
+        }
+        $this->appleMusicDurations[$songId] = null;
+        $parts = parse_url($this->baseUrl);
+        if (! is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            return null;
+        }
+        $origin = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+        try {
+            $html = $this->requestHtml($origin . '/songs/' . $songId . '/apple_music_player?app_config-is_react=1', 'songs/apple_music_player');
+        } catch (\Throwable) {
+            return null;
+        }
+        if (! is_string($html) || $html === '') {
+            return null;
+        }
+        $dom = new \DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $dom->loadHTML($html);
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        foreach ($dom->getElementsByTagName('apple-music-player') as $player) {
+            if ($player->getAttribute('is_matched') !== 'true' || (int) $player->getAttribute('song_id') !== $songId) {
+                continue;
+            }
+            $preview = json_decode($player->getAttribute('preview_track'), true);
+            $tracks = json_decode($player->getAttribute('apple_music_tracks'), true);
+            if (! is_array($preview) || ! is_array($tracks) || empty($preview['apple_id']) || ! is_numeric($preview['duration'] ?? null)) {
+                continue;
+            }
+            $duration = (float) $preview['duration'];
+            if (! is_finite($duration) || $duration <= 0 || $duration > 86400) {
+                continue;
+            }
+            foreach ($tracks as $track) {
+                if (is_array($track) && (string) ($track['apple_id'] ?? '') === (string) $preview['apple_id']
+                    && is_numeric($track['duration'] ?? null) && abs((float) $track['duration'] - $duration) < 1) {
+                    return $this->appleMusicDurations[$songId] = $duration;
+                }
+            }
+        }
+        return null;
     }
 
     /** @return array{requests:int,retries:int,duration_ms:int,groups:array<string,array{requests:int,retries:int,duration_ms:int,errors:int,statuses:array<string,int>}>} */
@@ -421,32 +482,153 @@ class GeniusClient
      */
     public function albumTracks(int $albumId): array
     {
+        return $this->albumTracklistResult($albumId)->tracks;
+    }
+
+    public function albumTracklistResult(int $albumId): AlbumTracklistResult
+    {
+        if (isset($this->albumTracklistResults[$albumId])) {
+            return $this->albumTracklistResults[$albumId];
+        }
+
+        if ((new \ReflectionMethod($this, 'albumTracks'))->getDeclaringClass()->getName() !== self::class) {
+            try {
+                $tracks = $this->albumTracks($albumId);
+                if ($tracks === []) {
+                    $legacyResult = $this->albumTracklistFromLegacyNumberOverride($albumId);
+                    if ($legacyResult instanceof AlbumTracklistResult) {
+                        return $this->albumTracklistResults[$albumId] = $legacyResult;
+                    }
+                }
+
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult($tracks, true, null, 1);
+            } catch (\Throwable $exception) {
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult([], false, $exception->getMessage(), 0);
+            }
+        }
+
+        // Keep legacy GeniusClient test doubles that override only the old
+        // albumTrackNumbers() seam usable, without adding this fallback to the
+        // real client's request path.
+        $legacyResult = $this->albumTracklistFromLegacyNumberOverride($albumId);
+        if ($legacyResult instanceof AlbumTracklistResult) {
+            return $this->albumTracklistResults[$albumId] = $legacyResult;
+        }
+
         $tracks = [];
+        $pagesFetched = 0;
 
         for ($page = 1; $page <= $this->maxPages; $page++) {
-            $payload = $this->get('albums/' . $albumId . '/tracks', [
-                'page' => $page,
-                'per_page' => $this->songsPerPage,
-            ], 'album-tracks:' . $albumId . ':' . $page . ':per:' . $this->songsPerPage, allowFailure: true);
+            try {
+                $payload = $this->get('albums/' . $albumId . '/tracks', [
+                    'page' => $page,
+                    'per_page' => $this->songsPerPage,
+                ], 'album-tracks:' . $albumId . ':' . $page . ':per:' . $this->songsPerPage, allowFailure: true);
+            } catch (\Throwable $exception) {
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+                    $this->uniqueAlbumTracks($tracks), false, $exception->getMessage(), $pagesFetched,
+                );
+            }
+
+            if (! is_array(Arr::get($payload, 'response.tracks'))) {
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+                    $this->uniqueAlbumTracks($tracks), false, 'Genius returned an invalid album tracklist payload.', $pagesFetched,
+                );
+            }
 
             $items = collect((array) Arr::get($payload, 'response.tracks', []))
                 ->filter(fn ($track) => is_array($track))
                 ->values()
                 ->all();
 
+            $itemsPayload = Arr::get($payload, 'response.tracks', []);
+            if (! $this->albumTrackItemsAreValid($itemsPayload)) {
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+                    $this->uniqueAlbumTracks($tracks), false, 'Genius returned malformed items in the album tracklist.', $pagesFetched,
+                );
+            }
+
+            $pagesFetched++;
+
             if ($items === []) {
-                break;
+                if (! empty(Arr::get($payload, 'response.next_page'))) {
+                    return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+                        $this->uniqueAlbumTracks($tracks), false, 'Genius returned an empty page with a next page advertised.', $pagesFetched,
+                    );
+                }
+
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult([], true, null, $pagesFetched);
             }
 
             array_push($tracks, ...$items);
 
             $nextPage = Arr::get($payload, 'response.next_page');
 
-            if (empty($nextPage) || count($items) < $this->songsPerPage) {
-                break;
+            if (empty($nextPage)) {
+                return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+                    $this->uniqueAlbumTracks($tracks), true, null, $pagesFetched,
+                );
             }
         }
 
+        return $this->albumTracklistResults[$albumId] = new AlbumTracklistResult(
+            $this->uniqueAlbumTracks($tracks), false, 'Genius album tracklist exceeded the configured page limit.', $pagesFetched,
+        );
+    }
+
+    private function albumTracklistFromLegacyNumberOverride(int $albumId): ?AlbumTracklistResult
+    {
+        if ((new \ReflectionMethod($this, 'albumTrackNumbers'))->getDeclaringClass()->getName() === self::class) {
+            return null;
+        }
+
+        try {
+            $numbers = $this->albumTrackNumbers($albumId);
+            $tracks = [];
+
+            foreach ($numbers as $songId => $number) {
+                $songId = (int) $songId;
+                if ($songId <= 0) {
+                    continue;
+                }
+
+                $song = null;
+                if ((new \ReflectionMethod($this, 'song'))->getDeclaringClass()->getName() !== self::class) {
+                    $song = $this->song($songId);
+                }
+
+                if (! is_array($song)
+                    && (new \ReflectionMethod($this, 'allArtistSongs'))->getDeclaringClass()->getName() !== self::class) {
+                    $song = collect($this->allArtistSongs(0))
+                        ->first(fn ($candidate) => is_array($candidate) && (int) ($candidate['id'] ?? 0) === $songId);
+                }
+
+                if (! is_array($song)) {
+                    return new AlbumTracklistResult(
+                        [],
+                        false,
+                        'A legacy album-track test double returned a song without a summary.',
+                        0,
+                    );
+                }
+
+                $tracks[] = [
+                    'number' => (int) $number,
+                    'song' => $song,
+                ];
+            }
+
+            return new AlbumTracklistResult($tracks, true, null, 1);
+        } catch (\Throwable $exception) {
+            return new AlbumTracklistResult([], false, $exception->getMessage(), 0);
+        }
+    }
+
+    /** @param array<int, array<string, mixed>> $tracks
+     *  @return array<int, array<string, mixed>>
+     */
+    private function uniqueAlbumTracks(array $tracks): array
+    {
         return collect($tracks)
             ->unique(function (array $track): int {
                 $song = is_array($track['song'] ?? null) ? $track['song'] : $track;
@@ -455,6 +637,26 @@ class GeniusClient
             })
             ->values()
             ->all();
+    }
+
+    private function albumTrackItemsAreValid(mixed $items): bool
+    {
+        if (! is_array($items)) {
+            return false;
+        }
+
+        foreach ($items as $item) {
+            if (! is_array($item)) {
+                return false;
+            }
+
+            $song = is_array($item['song'] ?? null) ? $item['song'] : $item;
+            if ((int) ($song['id'] ?? 0) <= 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -478,11 +680,13 @@ class GeniusClient
 
         // Preserve injected/mock client behavior in tests and integrations that
         // specialize the single-album API method.
-        if ((new \ReflectionMethod($this, 'albumTracks'))->getDeclaringClass()->getName() !== self::class) {
+        if ((new \ReflectionMethod($this, 'albumTracks'))->getDeclaringClass()->getName() !== self::class
+            || (new \ReflectionMethod($this, 'albumTrackNumbers'))->getDeclaringClass()->getName() !== self::class) {
             $result = [];
 
             foreach ($albumIds as $albumId) {
-                $result[$albumId] = $this->albumTracks($albumId);
+                $tracklist = $this->albumTracklistResult($albumId);
+                $result[$albumId] = $tracklist->tracks;
             }
 
             return $result;
@@ -490,6 +694,9 @@ class GeniusClient
 
         $startedAt = hrtime(true);
         $tracksByAlbum = array_fill_keys($albumIds, []);
+        $completeByAlbum = array_fill_keys($albumIds, true);
+        $pagesByAlbum = array_fill_keys($albumIds, 0);
+        $errorsByAlbum = array_fill_keys($albumIds, null);
         $activeAlbumIds = $albumIds;
 
         for ($page = 1; $page <= $this->maxPages && $activeAlbumIds !== []; $page++) {
@@ -567,6 +774,8 @@ class GeniusClient
                     if ($response instanceof \Throwable || ! $response instanceof Response) {
                         $message = $response instanceof \Throwable ? $response->getMessage() : 'No HTTP response was returned.';
                         $this->runtimeFailures[$cacheKey] = $message;
+                        $completeByAlbum[$albumId] = false;
+                        $errorsByAlbum[$albumId] = $message;
                         $this->recordRequestMetric($path, 'exception', 0, $retries);
                         $this->httpLog('warning', 'Genius album tracks batch request failed.', [
                             'path' => $path,
@@ -580,13 +789,16 @@ class GeniusClient
 
                     if ($response->status() === 404) {
                         $this->recordRequestMetric($path, 404, 0, $retries);
-                        $payloads[$albumId] = $this->runtimeCache[$cacheKey] = [];
+                        $completeByAlbum[$albumId] = false;
+                        $errorsByAlbum[$albumId] = 'Genius returned 404 for album tracklist.';
                         continue;
                     }
 
                     if (! $response->successful()) {
                         $message = sprintf('Genius API вернул %d для %s', $response->status(), $path);
                         $this->runtimeFailures[$cacheKey] = $message;
+                        $completeByAlbum[$albumId] = false;
+                        $errorsByAlbum[$albumId] = $message;
                         $this->recordRequestMetric($path, $response->status(), 0, $retries);
                         $this->httpLog('warning', 'Genius album tracks batch request failed.', [
                             'path' => $path,
@@ -602,9 +814,13 @@ class GeniusClient
 
                     $this->recordRequestMetric($path, $response->status(), 0, $retries);
                     $responsePayload = $response->json();
-                    $payloads[$albumId] = $this->runtimeCache[$cacheKey] = is_array($responsePayload)
-                        ? $this->sanitizePayload($responsePayload)
-                        : [];
+                    if (! is_array($responsePayload) || ! is_array(Arr::get($responsePayload, 'response.tracks'))) {
+                        $completeByAlbum[$albumId] = false;
+                        $errorsByAlbum[$albumId] = 'Genius returned an invalid album tracklist payload.';
+                        $this->runtimeFailures[$cacheKey] = $errorsByAlbum[$albumId];
+                        continue;
+                    }
+                    $payloads[$albumId] = $this->runtimeCache[$cacheKey] = $this->sanitizePayload($responsePayload);
                     $this->httpLog('info', 'Genius album tracks batch request completed.', [
                         'path' => $path,
                         'page' => $page,
@@ -618,22 +834,43 @@ class GeniusClient
 
             foreach ($activeAlbumIds as $albumId) {
                 if (! array_key_exists($albumId, $payloads)) {
+                    $completeByAlbum[$albumId] = false;
+                    $errorsByAlbum[$albumId] ??= 'Genius album tracklist page was not received.';
                     continue;
                 }
 
                 $payload = $payloads[$albumId];
-                $items = collect((array) Arr::get($payload, 'response.tracks', []))
+                $itemsPayload = Arr::get($payload, 'response.tracks');
+                if (! is_array($itemsPayload)) {
+                    $completeByAlbum[$albumId] = false;
+                    $errorsByAlbum[$albumId] ??= 'Genius returned an invalid album tracklist payload.';
+                    continue;
+                }
+                $itemsPayload = Arr::get($payload, 'response.tracks', []);
+                $items = collect((array) $itemsPayload)
                     ->filter(fn ($track) => is_array($track))
                     ->values()
                     ->all();
 
+                if (! $this->albumTrackItemsAreValid($itemsPayload)) {
+                    $completeByAlbum[$albumId] = false;
+                    $errorsByAlbum[$albumId] ??= 'Genius returned malformed items in the album tracklist.';
+                    continue;
+                }
+
+                $pagesByAlbum[$albumId]++;
+
                 if ($items === []) {
+                    if (! empty(Arr::get($payload, 'response.next_page'))) {
+                        $completeByAlbum[$albumId] = false;
+                        $errorsByAlbum[$albumId] ??= 'Genius returned an empty page with a next page advertised.';
+                    }
                     continue;
                 }
 
                 array_push($tracksByAlbum[$albumId], ...$items);
 
-                if (! empty(Arr::get($payload, 'response.next_page')) && count($items) >= $this->songsPerPage) {
+                if (! empty(Arr::get($payload, 'response.next_page'))) {
                     $nextActiveAlbumIds[] = $albumId;
                 }
             }
@@ -643,15 +880,19 @@ class GeniusClient
 
         $result = [];
 
-        foreach ($tracksByAlbum as $albumId => $tracks) {
-            $result[$albumId] = collect($tracks)
-                ->unique(function (array $track): int {
-                    $song = is_array($track['song'] ?? null) ? $track['song'] : $track;
+        foreach ($activeAlbumIds as $albumId) {
+            $completeByAlbum[$albumId] = false;
+            $errorsByAlbum[$albumId] ??= 'Genius album tracklist exceeded the configured page limit.';
+        }
 
-                    return (int) ($song['id'] ?? 0);
-                })
-                ->values()
-                ->all();
+        foreach ($tracksByAlbum as $albumId => $tracks) {
+            $result[$albumId] = $this->uniqueAlbumTracks($tracks);
+            $this->albumTracklistResults[(int) $albumId] = new AlbumTracklistResult(
+                $result[$albumId],
+                (bool) ($completeByAlbum[$albumId] ?? false),
+                $errorsByAlbum[$albumId] ?? null,
+                (int) ($pagesByAlbum[$albumId] ?? 0),
+            );
         }
 
         $this->httpLog('info', 'Genius album tracks batch completed.', [
@@ -916,7 +1157,7 @@ class GeniusClient
         }
     }
 
-    private function requestHtml(string $url): ?string
+    private function requestHtml(string $url, string $metricPath = 'albums/html'): ?string
     {
         $startedAt = hrtime(true);
         $attemptCount = 0;
@@ -944,7 +1185,7 @@ class GeniusClient
         } catch (\Throwable $exception) {
             $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
             $retries = max(0, $attemptCount - 1);
-            $this->recordRequestMetric('albums/html', 'exception', $durationMs, $retries);
+            $this->recordRequestMetric($metricPath, 'exception', $durationMs, $retries);
             $this->httpLog('warning', 'Genius HTML request threw an exception.', [
                 'url' => $url,
                 'exception' => $exception->getMessage(),
@@ -959,7 +1200,7 @@ class GeniusClient
 
         $durationMs = (int) round((hrtime(true) - $startedAt) / 1_000_000);
         $retries = max(0, $attemptCount - 1);
-        $this->recordRequestMetric('albums/html', $response->status(), $durationMs, $retries);
+        $this->recordRequestMetric($metricPath, $response->status(), $durationMs, $retries);
 
         if (! $response->successful()) {
             $this->httpLog('warning', 'Genius HTML request failed.', [
