@@ -19,6 +19,8 @@ class AlbumResource extends JsonResource
             'title' => $this->title,
             'slug' => $this->slug,
             'genius_id' => $this->genius_id,
+            'release_type' => \App\Support\ReleaseType::normalize($this->resource->getAttributes()['genius_album_type'] ?? null)
+                ?? \App\Support\ReleaseType::normalize($this->resource->getAttributes()['muzofond_album_type'] ?? null),
             'cover_image_url' => $coverImageUrl,
             'release_date' => $this->release_date?->toDateString(),
             'release_date_components' => $this->release_date_components,

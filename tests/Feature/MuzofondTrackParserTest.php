@@ -11,6 +11,27 @@ use Tests\TestCase;
 
 class MuzofondTrackParserTest extends TestCase
 {
+    public function test_release_type_uses_the_explicit_collection_label(): void
+    {
+        $method = (new ReflectionClass(app(MuzofondTrackParser::class)))->getMethod('extractAlbumReleaseType');
+        $parser = app(MuzofondTrackParser::class);
+        $html = '<html><body><div class="collectionTopHeader"><div class="collectionTopLabel">Сингл</div></div><a>Слушать альбом</a></body></html>';
+        $this->assertSame('single', $method->invoke($parser, $html));
+        $this->assertSame('album', $method->invoke($parser, str_replace('Сингл', 'Альбом', $html)));
+        $this->assertNull($method->invoke($parser, str_replace('Сингл', 'Неизвестно', $html)));
+    }
+    public function test_album_page_completeness_requires_the_whole_structured_tracklist(): void
+    {
+        $parser = app(\App\Services\TrackParsing\MuzofondTrackParser::class);
+        $reflection = new \ReflectionClass($parser);
+        $html = file_get_contents(base_path('tests/Fixtures/muzofond-saluki-ulicy-doma.html'));
+        $tracks = $reflection->getMethod('extractTracksFromAlbumPage')->invoke($parser, $html, 'SALUKI');
+        $complete = $reflection->getMethod('albumPageTracklistIsComplete');
+        $this->assertTrue($complete->invoke($parser, $html, $tracks));
+        $this->assertFalse($complete->invoke($parser, str_replace('</head>', '<a rel="next" href="/next">next</a></head>', $html), $tracks));
+        array_pop($tracks);
+        $this->assertFalse($complete->invoke($parser, $html, $tracks));
+    }
     public function test_real_album_pages_keep_parenthesized_song_titles_and_page_album(): void
     {
         $cases = [
@@ -79,6 +100,17 @@ class MuzofondTrackParserTest extends TestCase
         $preferred = (new ReflectionClass($parser))->getMethod('preferredParsedTrack')->invoke($parser, $generic, $named);
 
         $this->assertSame('Example Song (Named Remix)', $preferred->title);
+    }
+
+    public function test_same_audio_and_album_name_retains_both_page_urls(): void
+    {
+        $parser = app(MuzofondTrackParser::class);
+        $first = new ParsedTrack('Song', 120, 'https://audio.test/1.mp3', 'Release', 1, sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+            albumAppearances: [['title' => 'Release', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 1, 'source_url' => 'https://source.test/a']]);
+        $second = new ParsedTrack('Song', 120, 'https://audio.test/1.mp3', 'Release', 1, sourceType: ParsedTrack::SOURCE_ALBUM_PAGE,
+            albumAppearances: [['title' => 'Release', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 1, 'source_url' => 'https://source.test/b']]);
+        $preferred = (new ReflectionClass($parser))->getMethod('preferredParsedTrack')->invoke($parser, $first, $second);
+        $this->assertEqualsCanonicalizing(['https://source.test/a', 'https://source.test/b'], $preferred->albumAppearances[0]['source_urls']);
     }
 
     public function test_explicit_artist_page_release_survives_self_titled_album_page_for_same_audio(): void
@@ -154,6 +186,10 @@ class MuzofondTrackParserTest extends TestCase
 
         $this->assertNotNull($page);
         $this->assertSame('Mayot', $page->artistName);
+        $this->assertCount(1, $page->albumPages);
+        $this->assertFalse($page->albumPages[0]['complete']);
+        $this->assertSame('https://muzofond.fm/collections/albums/mayot%20ghetto%20garden', $page->albumPages[0]['url']);
+        $this->assertSame($page->albumPages[0]['url'], $page->tracks[0]->albumAppearances[0]['source_url']);
         $this->assertCount(3, $page->tracks);
         $this->assertSame('https://files.test/shared.mp3', $page->tracks[0]->audioUrl);
         $this->assertSame('Ghetto Garden', $page->tracks[0]->albumTitle);

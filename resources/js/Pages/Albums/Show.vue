@@ -24,6 +24,7 @@ const displayReleaseDate = computed(() => formatAlbumReleaseDate({
     release_date: runtime.value?.album?.release_date ?? props.album.release_date,
     release_date_components: runtime.value?.album?.release_date_components ?? props.album.release_date_components,
 }));
+const releaseTypeLabel = computed(() => ({ single: 'Сингл', album: 'Альбом', ep: 'EP', mixtape: 'Микстейп', compilation: 'Сборник' }[props.album?.release_type] ?? null));
 const albumArtists = computed(() => Array.isArray(props.album?.artists) && props.album.artists.length ? props.album.artists : (props.album?.artist ? [props.album.artist] : []));
 const player = usePlayerStore();
 const firstTrack = computed(() => trackItems.value[0] ?? null);
@@ -66,7 +67,7 @@ onMounted(fetchRuntime);
         <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover album-page__hero-cover" role="button" tabindex="0" @click="toggleAlbumPlayback" @keydown.enter.prevent="toggleAlbumPlayback" @keydown.space.prevent="toggleAlbumPlayback">
 
         <div class="album-page__hero-body">
-            <span class="eyebrow">Альбом</span>
+            <span v-if="releaseTypeLabel" class="eyebrow">{{ releaseTypeLabel }}</span>
             <h1>{{ album.title }}</h1>
 
             <p class="hero-card__description album-page__artists-row">

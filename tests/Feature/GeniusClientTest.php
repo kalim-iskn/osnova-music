@@ -10,6 +10,50 @@ use Tests\TestCase;
 
 class GeniusClientTest extends TestCase
 {
+    public function test_album_catalog_completion_distinguishes_complete_missing_and_truncated_pages(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        config()->set('services.genius.max_pages', 1);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://genius.test/api/artists/1/albums*' => Http::response(['response' => ['albums' => [['id' => 11, 'name' => 'A']], 'next_page' => null]]),
+            'https://genius.test/api/artists/2/albums*' => Http::response(['response' => ['albums' => [['id' => 22, 'name' => 'B']], 'next_page' => 2]]),
+            'https://genius.test/api/artists/3/albums*' => Http::response(['response' => ['albums' => [['id' => 33, 'name' => 'C']]]]),
+            'https://genius.test/api/artists/4/albums*' => Http::response([], 404),
+            'https://genius.test/api/artists/5/albums*' => Http::response(['response' => ['albums' => [['id' => 55]], 'next_page' => null]]),
+        ]);
+        $client = new GeniusClient();
+        $this->assertSame([11], array_column($client->allArtistAlbums(1), 'id'));
+        $this->assertTrue($client->artistAlbumCatalogIsComplete());
+        $this->assertSame([22], array_column($client->allArtistAlbums(2), 'id'));
+        $this->assertFalse($client->artistAlbumCatalogIsComplete());
+        $this->assertSame([33], array_column($client->allArtistAlbums(3), 'id'));
+        $this->assertFalse($client->artistAlbumCatalogIsComplete());
+        $this->assertSame([], $client->allArtistAlbums(4));
+        $this->assertFalse($client->artistAlbumCatalogIsComplete());
+        $this->assertSame([55], array_column($client->allArtistAlbums(5), 'id'));
+        $this->assertFalse($client->artistAlbumCatalogIsComplete());
+    }
+
+    public function test_album_search_does_not_treat_an_unrecognised_or_full_page_as_no_results(): void
+    {
+        config()->set('services.genius.base_url', 'https://genius.test/api');
+        Http::preventStrayRequests();
+        Http::fake(function (Request $request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            return match ($query['q'] ?? '') {
+                'found' => Http::response(['response' => ['sections' => [['type' => 'album', 'hits' => [['result' => ['id' => 7, 'name' => 'Album']]]]]]]),
+                'empty' => Http::response(['response' => ['sections' => []]]),
+                'full' => Http::response(['response' => ['sections' => [['type' => 'album', 'hits' => array_fill(0, 10, ['result' => ['id' => 7]])]]]]),
+                default => Http::response(['response' => []]),
+            };
+        });
+        $client = new GeniusClient();
+        $this->assertSame([7], array_column($client->searchAlbums('found'), 'id'));
+        $this->assertSame([], $client->searchAlbums('empty'));
+        $this->assertNull($client->searchAlbums('full'));
+        $this->assertNull($client->searchAlbums('bad'));
+    }
     public function test_apple_player_duration_requires_a_matching_real_apple_track_and_is_cached(): void
     {
         config()->set('services.genius.base_url', 'https://genius.test/api');

@@ -24,6 +24,8 @@ class Album extends Model
         'release_date',
         'release_date_components',
         'genius_id',
+        'genius_album_type',
+        'muzofond_album_type',
     ];
 
     protected function casts(): array

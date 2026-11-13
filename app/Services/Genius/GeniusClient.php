@@ -86,6 +86,8 @@ class GeniusClient
     /** @var array<int, float|null> */
     private array $appleMusicDurations = [];
 
+    private bool $artistAlbumCatalogComplete = false;
+
     public function __construct()
     {
         $this->baseUrl = rtrim((string) config('services.genius.base_url', 'https://genius.com/api'), '/');
@@ -118,6 +120,7 @@ class GeniusClient
         $this->runtimeAlbumTrackNumbersCache = [];
         $this->albumTracklistResults = [];
         $this->appleMusicDurations = [];
+        $this->artistAlbumCatalogComplete = false;
         $this->resetMetrics();
     }
 
@@ -210,6 +213,35 @@ class GeniusClient
         }
 
         return [];
+    }
+
+    /** @return array<int, array<string, mixed>>|null Null means an incomplete or unrecognised response. */
+    public function searchAlbums(string $query): ?array
+    {
+        $payload = $this->get('search/album', ['q' => $query], 'search-album:' . md5($query));
+        $sections = Arr::get($payload, 'response.sections');
+        if (! is_array($sections)) {
+            return null;
+        }
+        foreach ($sections as $section) {
+            if (! is_array($section) || ($section['type'] ?? null) !== 'album') {
+                continue;
+            }
+            if (! is_array($section['hits'] ?? null) || ! empty($section['next_page']) || count($section['hits']) >= 10) {
+                return null;
+            }
+            $albums = [];
+            foreach ($section['hits'] as $hit) {
+                $album = is_array($hit) ? ($hit['result'] ?? null) : null;
+                if (! is_array($album) || (int) ($album['id'] ?? 0) <= 0
+                    || ! is_string($album['name'] ?? $album['title'] ?? $album['full_title'] ?? $album['display_title'] ?? null)) {
+                    return null;
+                }
+                $albums[] = $album;
+            }
+            return $albums;
+        }
+        return $sections === [] ? [] : null;
     }
 
     /**
@@ -1001,6 +1033,8 @@ class GeniusClient
     public function allArtistAlbums(int $artistId): array
     {
         $albums = [];
+        $this->artistAlbumCatalogComplete = false;
+        $catalogReliable = true;
 
         for ($page = 1; $page <= $this->maxPages; $page++) {
             $payload = $this->get('artists/' . $artistId . '/albums', [
@@ -1008,18 +1042,40 @@ class GeniusClient
                 'per_page' => $this->albumsPerPage,
             ], 'artist-albums:' . $artistId . ':' . $page . ':per:' . $this->albumsPerPage, allowFailure: true);
 
+            $response = Arr::get($payload, 'response');
+            if (! is_array($response) || ! is_array($response['albums'] ?? null)) {
+                break;
+            }
+            $paginationKnown = array_key_exists('next_page', $response)
+                && ($response['next_page'] === null || (is_numeric($response['next_page']) && (int) $response['next_page'] > $page));
+            if ($paginationKnown && $response['next_page'] !== null && (int) $response['next_page'] !== $page + 1) {
+                $catalogReliable = false;
+            }
+            foreach ($response['albums'] as $album) {
+                if (! is_array($album) || (int) ($album['id'] ?? 0) <= 0
+                    || ! is_string($album['name'] ?? $album['title'] ?? $album['full_title'] ?? $album['display_title'] ?? null)) {
+                    $catalogReliable = false;
+                }
+            }
+
             $items = collect((array) Arr::get($payload, 'response.albums', []))
                 ->filter(fn ($album) => is_array($album))
                 ->values()
                 ->all();
 
             if ($items === []) {
+                $this->artistAlbumCatalogComplete = $catalogReliable && $paginationKnown && $response['next_page'] === null;
                 break;
             }
 
             array_push($albums, ...$items);
 
-            if (empty(Arr::get($payload, 'response.next_page'))) {
+            if (! $paginationKnown) {
+                break;
+            }
+
+            if ($response['next_page'] === null) {
+                $this->artistAlbumCatalogComplete = $catalogReliable;
                 break;
             }
         }
@@ -1028,6 +1084,11 @@ class GeniusClient
             ->unique(fn ($album) => (int) ($album['id'] ?? 0))
             ->values()
             ->all();
+    }
+
+    public function artistAlbumCatalogIsComplete(): bool
+    {
+        return $this->artistAlbumCatalogComplete;
     }
 
     public function artistImageUrl(array $artist): ?string

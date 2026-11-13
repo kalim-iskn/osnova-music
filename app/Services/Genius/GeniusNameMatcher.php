@@ -385,6 +385,9 @@ class GeniusNameMatcher
         $value = preg_replace('/\b(snippet|romanized|romanization|translation|translated|lyrics)\b/iu', '', $value) ?? $value;
         $value = preg_replace('/\s*[\(\[\{].*?[\)\]\}]/u', '', $value) ?? $value;
         $value = self::repairMojibake(self::cleanWhitespace($value));
+        if (mb_strlen($value) === 1 && preg_match('/^[^\p{L}\p{N}\s]$/u', $value) === 1) {
+            return $value;
+        }
         $value = Str::lower($value);
         $value = str_replace(['ё'], ['е'], $value);
         $value = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $value) ?? $value;

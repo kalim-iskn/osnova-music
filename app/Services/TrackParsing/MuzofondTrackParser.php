@@ -172,6 +172,7 @@ class MuzofondTrackParser
             ->all();
         $albumPagesHtml = $this->fetchHtmlMany($albumLinks, false);
         $albumTracks = [];
+        $albumPages = [];
 
         foreach ($albumLinks as $albumLink) {
             $albumHtml = $albumPagesHtml[$albumLink] ?? null;
@@ -180,7 +181,26 @@ class MuzofondTrackParser
                 continue;
             }
 
-            $albumTracks = array_merge($albumTracks, $this->extractTracksFromAlbumPage($albumHtml, $artistName));
+            $pageTracks = $this->extractTracksFromAlbumPage($albumHtml, $artistName);
+            foreach ($pageTracks as $track) {
+                foreach ($track->albumAppearances as &$appearance) {
+                    if (($appearance['source_type'] ?? null) === ParsedTrack::SOURCE_ALBUM_PAGE) {
+                        $appearance['source_url'] = $albumLink;
+                        $appearance['source_urls'] = [$albumLink];
+                    }
+                }
+                unset($appearance);
+            }
+            if ($pageTracks !== [] && $pageTracks[0]->albumTitle !== null) {
+                $albumPages[] = [
+                    'url' => $albumLink,
+                    'title' => $pageTracks[0]->albumTitle,
+                    'release_type' => $this->extractAlbumReleaseType($albumHtml),
+                    'complete' => $this->albumPageTracklistIsComplete($albumHtml, $pageTracks),
+                    'tracks' => $pageTracks,
+                ];
+            }
+            $albumTracks = array_merge($albumTracks, $pageTracks);
         }
 
         $albumTracks = $this->uniqueTracksByAudioIdentity($albumTracks);
@@ -222,7 +242,51 @@ class MuzofondTrackParser
             artistSlug: Str::slug($artistName) ?: $slug,
             imageUrl: $imageUrl,
             tracks: $tracks,
+            albumPages: $albumPages,
         );
+    }
+
+    private function extractAlbumReleaseType(string $html): ?string
+    {
+        return \App\Support\ReleaseType::normalize($this->firstNonEmptyText($this->makeXPath($html), [
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' collectionTopHeader ')]//*[contains(concat(' ', normalize-space(@class), ' '), ' collectionTopLabel ')]",
+        ]));
+    }
+
+    /** @param ParsedTrack[] $tracks */
+    private function albumPageTracklistIsComplete(string $html, array $tracks): bool
+    {
+        $xpath = $this->makeXPath($html);
+        if ($xpath->query('//a[@rel="next"]')->length > 0) {
+            return false;
+        }
+        foreach ($xpath->query('//script[@type="application/ld+json"]') as $script) {
+            $data = json_decode($script->textContent, true);
+            if (! is_array($data) || ($data['@type'] ?? null) !== 'MusicAlbum' || ! is_array($data['track'] ?? null)) {
+                continue;
+            }
+            $items = $data['track'];
+            if ($items === [] || count($items) !== count($tracks)) {
+                return false;
+            }
+            foreach ($items as $index => $item) {
+                $track = $tracks[$index] ?? null;
+                if (! is_array($item) || ! $track instanceof ParsedTrack
+                    || GeniusNameMatcher::canonicalTrack((string) ($item['name'] ?? '')) !== GeniusNameMatcher::canonicalTrack($track->title)) {
+                    return false;
+                }
+                try {
+                    $duration = new \DateInterval((string) ($item['duration'] ?? ''));
+                } catch (\Throwable) {
+                    return false;
+                }
+                if (($duration->h * 3600 + $duration->i * 60 + $duration->s) !== $track->durationSeconds) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     private function isArtistsListingUrl(string $url): bool
@@ -1123,6 +1187,16 @@ class MuzofondTrackParser
 
             if ($key !== '' && ! isset($appearances[$key])) {
                 $appearances[$key] = $appearance;
+            } elseif ($key !== '' && isset($appearances[$key])) {
+                $urls = array_values(array_unique(array_filter(array_merge(
+                    (array) ($appearances[$key]['source_urls'] ?? []),
+                    (array) ($appearance['source_urls'] ?? []),
+                    [$appearances[$key]['source_url'] ?? null, $appearance['source_url'] ?? null],
+                ), 'is_string')));
+                if ($urls !== []) {
+                    $appearances[$key]['source_urls'] = $urls;
+                    $appearances[$key]['source_url'] ??= $urls[0];
+                }
             }
         }
 
