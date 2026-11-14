@@ -52,6 +52,10 @@ class ParsingStatusController extends Controller
         $queueJobs = DB::table('jobs')->where('queue', $queueName)->get(['created_at', 'reserved_at']);
         $pendingJobs = $queueJobs->whereNull('reserved_at')->count();
         $reservedJobs = $queueJobs->whereNotNull('reserved_at')->count();
+        $audioJobs = DB::table('jobs')->where('queue', $queueName)
+            ->where('payload', 'like', '%FindMissingTrackAudioJob%')->get(['reserved_at']);
+        $audioPending = $audioJobs->whereNull('reserved_at')->count();
+        $audioReserved = $audioJobs->whereNotNull('reserved_at')->count();
         $oldestPending = $queueJobs->whereNull('reserved_at')->min('created_at');
         $trackedQueued = ParsingTask::query()->where('status', 'queued')->count();
         $trackedRunning = ParsingTask::query()->where('status', 'running')->count();
@@ -61,8 +65,10 @@ class ParsingStatusController extends Controller
                 'name' => $queueName,
                 'pending' => $pendingJobs,
                 'reserved' => $reservedJobs,
-                'untracked_pending' => max(0, $pendingJobs - $trackedQueued),
-                'untracked_reserved' => max(0, $reservedJobs - $trackedRunning),
+                'untracked_pending' => max(0, $pendingJobs - $audioPending - $trackedQueued),
+                'untracked_reserved' => max(0, $reservedJobs - $audioReserved - $trackedRunning),
+                'audio_search_pending' => $audioPending,
+                'audio_search_reserved' => $audioReserved,
                 'oldest_wait_seconds' => $oldestPending ? max(0, now()->timestamp - (int) $oldestPending) : 0,
                 'worker_state' => $reservedJobs > 0
                     ? 'processing'

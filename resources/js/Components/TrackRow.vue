@@ -36,6 +36,7 @@ const active = computed(() => player.currentTrack?.id === props.track.id);
 const isPlaying = computed(() => active.value && player.isPlaying);
 
 const toggleTrack = async () => {
+    if (props.track.is_playable === false) return;
     if (active.value) {
         await player.togglePlayback();
         return;
@@ -52,9 +53,9 @@ const addToQueue = () => {
 <template>
     <article class="track-row" :class="{ 'track-row--active': active, 'track-row--numbered': showTrackNumber }">
         <span v-if="showTrackNumber" class="track-row__number">{{ track.track_number }}</span>
-        <button type="button" class="track-row__cover-button" @click="toggleTrack" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
+        <button type="button" class="track-row__cover-button" :disabled="track.is_playable === false" @click="toggleTrack" :aria-label="track.is_playable === false ? 'Аудио пока недоступно' : (isPlaying ? 'Пауза' : 'Воспроизвести')">
             <img :src="track.cover_image_url" :alt="track.title" class="track-row__cover">
-            <span class="track-row__cover-state">
+            <span v-if="track.is_playable !== false" class="track-row__cover-state">
                 {{ isPlaying ? '❚❚' : '▶' }}
             </span>
         </button>
@@ -76,11 +77,12 @@ const addToQueue = () => {
                     </Link>
                 </template>
             </div>
+            <div v-if="track.is_playable === false" class="track-row__meta">Аудио пока недоступно</div>
         </div>
 
         <div class="track-row__actions">
             <div class="track-row__buttons">
-                <button class="ghost-button ghost-button--small track-row__queue-button" type="button" @click.stop="addToQueue">
+                <button class="ghost-button ghost-button--small track-row__queue-button" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
                     В очередь
                 </button>
                 <TrackInfoMenu :track="track" />

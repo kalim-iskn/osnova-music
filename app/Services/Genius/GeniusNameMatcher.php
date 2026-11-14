@@ -378,7 +378,7 @@ class GeniusNameMatcher
     public static function canonicalTrack(string $value): string
     {
         $symbol = trim($value);
-        if (mb_strlen($symbol) === 1 && preg_match('/^[^\p{L}\p{N}\s]$/u', $symbol) === 1) {
+        if (preg_match('/^[^\p{L}\p{N}\s]+$/u', $symbol) === 1) {
             return $symbol;
         }
         $value = self::storageValue($value);
@@ -1039,7 +1039,10 @@ class GeniusNameMatcher
             return false;
         }
 
-        return preg_match('/[\p{L}\p{N}]/u', $base) === 1;
+        // A Latin suffix after a Latin album title is not automatically a translation.
+        return preg_match('/[\p{L}\p{N}]/u', $base) === 1
+            && (preg_match('/\p{Cyrillic}/u', $base) === 1 || preg_match('/\p{Cyrillic}/u', $meta) === 1
+                || preg_match('/\b(?:translation|translated|romanized|romanization)\b/iu', $meta) === 1);
     }
 
     private static function isVersionDescriptor(string $value): bool
@@ -1050,7 +1053,7 @@ class GeniusNameMatcher
             return false;
         }
 
-        return preg_match('/^(?:live(?:\s+version|\s+(?:at|in|from|on|recorded)\s+.+)?|concert(?:\s+version|\s+(?:at|in)\s+.+)?|remix(?:es)?(?:\s+by\s+.+)?|(?:.+\s+)?(?:remix|remiks|микс|mix)|instrumental(?:\s+version)?|karaoke(?:\s+version)?|demo(?:\s+version)?|acoustic(?:\s+version)?|radio\s+edit|edit|deluxe(?:\s+edition)?|expanded(?:\s+edition)?|bonus(?:\s+edition)?|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original\s+mix|extended(?:\s+mix|\s+version)?|club\s+mix|clean|explicit|prod|cover|ring(?: ?tone)?|caller\s+tune|na\s+zvonok)$/iu', $normalized) === 1;
+        return preg_match('/^(?:live(?:\s+version|\s+(?:at|in|from|on|recorded)\s+.+)?|concert(?:\s+version|\s+(?:at|in)\s+.+)?|remix(?:es)?(?:\s+by\s+.+)?|(?:.+\s+)?(?:remix|remiks|микс|mix)|instrumental(?:\s+version)?|karaoke(?:\s+version)?|demo(?:\s+version)?|acoustic(?:\s+version)?|radio\s+edit|edit|deluxe(?:\s+edition)?|expanded(?:\s+edition)?|(?:complete|special|anniversary)\s+edition|bonus(?:\s+edition)?|ep|single|version|edition|remaster(?:ed)?|mono|stereo|original\s+mix|extended(?:\s+mix|\s+version)?|club\s+mix|clean|explicit|prod|cover|ring(?: ?tone)?|caller\s+tune|na\s+zvonok)$/iu', $normalized) === 1;
     }
 
     private static function looksLikeMojibake(string $value): bool

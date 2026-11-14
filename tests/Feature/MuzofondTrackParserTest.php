@@ -11,6 +11,30 @@ use Tests\TestCase;
 
 class MuzofondTrackParserTest extends TestCase
 {
+    public function test_artist_page_retains_the_source_slug_separately_from_display_name(): void
+    {
+        Http::fake([
+            'https://muzofond.fm/collections/artists/source-alias' => Http::response(
+                $this->artistPageHtml([], false, artistName: 'Different Name', artistSlug: 'source-alias'), 200
+            ),
+            '*' => Http::response('', 404),
+        ]);
+        $page = app(MuzofondTrackParser::class)->parse('https://muzofond.fm/collections/artists/source-alias')[0];
+        $this->assertSame('Different Name', $page->artistName);
+        $this->assertSame('different-name', $page->artistSlug);
+        $this->assertSame('source-alias', $page->sourceSlug);
+    }
+    public function test_album_cover_prefers_large_image_from_real_release_pages(): void
+    {
+        $parser = app(MuzofondTrackParser::class);
+        $method = (new ReflectionClass($parser))->getMethod('extractAlbumImageUrl');
+        foreach (['muzofond-cortisol-release.html' => '488528', 'muzofond-basta-plus-release.html' => '465284'] as $file => $id) {
+            $html = file_get_contents(base_path('tests/Fixtures/'.$file));
+            $this->assertSame("https://muzofond.fm/img/albums/{$id}_large.jpg", $method->invoke($parser, $html));
+        }
+        $html = '<div class="tracksHeader"><img src="/img/albums/42_small.jpg"></div>';
+        $this->assertSame('https://muzofond.fm/img/albums/42_small.jpg', $method->invoke($parser, $html));
+    }
     public function test_release_type_uses_the_explicit_collection_label(): void
     {
         $method = (new ReflectionClass(app(MuzofondTrackParser::class)))->getMethod('extractAlbumReleaseType');
@@ -111,6 +135,18 @@ class MuzofondTrackParserTest extends TestCase
             albumAppearances: [['title' => 'Release', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 1, 'source_url' => 'https://source.test/b']]);
         $preferred = (new ReflectionClass($parser))->getMethod('preferredParsedTrack')->invoke($parser, $first, $second);
         $this->assertEqualsCanonicalizing(['https://source.test/a', 'https://source.test/b'], $preferred->albumAppearances[0]['source_urls']);
+    }
+
+    public function test_same_audio_keeps_symbolic_album_page_appearance(): void
+    {
+        $parser = app(MuzofondTrackParser::class);
+        $artist = new ParsedTrack('Sss', 130, 'https://audio.test/1.mp3', null, artistNames: ['Artist'], audioFileId: '1');
+        $album = new ParsedTrack('Sss', 130, 'https://audio.test/1.mp3', '?', 11, ['Artist'],
+            sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1',
+            albumAppearances: [['title' => '?', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 11, 'source_url' => 'https://source.test/question']]);
+        $merged = (new ReflectionClass($parser))->getMethod('preferredParsedTrack')->invoke($parser, $artist, $album);
+        $this->assertSame('?', $merged->albumAppearances[0]['title'] ?? null);
+        $this->assertSame(11, $merged->albumAppearances[0]['track_number'] ?? null);
     }
 
     public function test_explicit_artist_page_release_survives_self_titled_album_page_for_same_audio(): void

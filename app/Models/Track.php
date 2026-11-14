@@ -90,8 +90,11 @@ class Track extends Model
         return $this->belongsToMany(User::class, 'track_user_likes')->withTimestamps();
     }
 
-    public function getDurationHumanAttribute(): string
+    public function getDurationHumanAttribute(): ?string
     {
+        if ($this->duration_seconds === null) {
+            return null;
+        }
         $minutes = intdiv((int) $this->duration_seconds, 60);
         $seconds = (int) $this->duration_seconds % 60;
 

@@ -7,6 +7,21 @@ use Tests\TestCase;
 
 class GeniusNameMatcherTest extends TestCase
 {
+    public function test_symbol_only_track_titles_are_preserved(): void
+    {
+        $this->assertSame('$$$', GeniusNameMatcher::canonicalTrack('$$$'));
+        $this->assertSame('*', GeniusNameMatcher::canonicalTrack('*'));
+        $this->assertSame('', GeniusNameMatcher::canonicalTrack('  '));
+    }
+    public function test_album_editions_are_not_removed_as_translations(): void
+    {
+        foreach (['Complete', 'Special', 'Anniversary', 'Deluxe', 'Expanded'] as $edition) {
+            $title = "Revenge ({$edition} Edition)";
+            $this->assertSame($title, GeniusNameMatcher::albumStorageValue($title));
+        }
+        $this->assertSame('Revenge (Other Songs)', GeniusNameMatcher::albumStorageValue('Revenge (Other Songs)'));
+        $this->assertSame('БОГ РЭПА', GeniusNameMatcher::albumStorageValue('БОГ РЭПА (RAPGOD)'));
+    }
     public function test_normalize_stored_track_title_removes_invisible_markers(): void
     {
         $input = "\u{200C}\u{200D}\u{200D}xaNNy";

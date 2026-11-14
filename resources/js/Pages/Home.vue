@@ -15,7 +15,7 @@ const props = defineProps({
 });
 
 const player = usePlayerStore();
-const leadTrack = computed(() => props.featuredTracks?.[0] ?? null);
+const leadTrack = computed(() => props.featuredTracks?.find((track) => track.is_playable !== false) ?? null);
 const leadTrackIsPlaying = computed(() => player.currentTrack?.id === leadTrack.value?.id && player.isPlaying);
 
 const playLeadTrack = async () => {

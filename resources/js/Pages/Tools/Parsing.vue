@@ -196,6 +196,9 @@ onUnmounted(() => window.clearInterval(pollTimer));
             <div class="parsing-queue-summary__stats">
                 <span><strong>{{ status.queue.pending }}</strong> ожидают</span>
                 <span><strong>{{ status.queue.reserved }}</strong> выполняются</span>
+                <span v-if="status.queue.audio_search_pending || status.queue.audio_search_reserved">
+                    Поиск аудио: <strong>{{ status.queue.audio_search_pending }}</strong> ожидают, <strong>{{ status.queue.audio_search_reserved }}</strong> выполняются
+                </span>
                 <span><strong>{{ activeTasks }}</strong> активных артистов</span>
                 <span v-if="status.queue.oldest_wait_seconds"><strong>{{ durationLabel(status.queue.oldest_wait_seconds) }}</strong> ждёт старшее задание</span>
             </div>

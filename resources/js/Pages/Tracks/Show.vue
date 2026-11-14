@@ -54,7 +54,7 @@ const isTrackCurrent = computed(() => player.currentTrack?.id === props.track?.i
 const isTrackPlaying = computed(() => isTrackCurrent.value && player.isPlaying);
 
 const toggleTrackPlayback = async () => {
-    if (!props.track) {
+    if (!props.track || props.track.is_playable === false) {
         return;
     }
 
@@ -137,9 +137,10 @@ onMounted(fetchRuntime);
             <button
                 type="button"
                 class="track-page__play-button"
+                :disabled="track.is_playable === false"
                 @click="toggleTrackPlayback"
             >
-                {{ isTrackPlaying ? 'Стоп' : 'Слушать трек' }}
+                {{ track.is_playable === false ? 'Аудио пока недоступно' : (isTrackPlaying ? 'Стоп' : 'Слушать трек') }}
             </button>
 
             <div v-if="runtimeLoading" class="track-page__status">Загружаю расширенные данные Genius…</div>

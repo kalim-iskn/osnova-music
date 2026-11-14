@@ -22,6 +22,7 @@ const active = computed(() => player.currentTrack?.id === props.track.id);
 const isPlaying = computed(() => active.value && player.isPlaying);
 
 const toggleTrack = async () => {
+    if (props.track.is_playable === false) return;
     if (active.value) {
         await player.togglePlayback();
         return;
@@ -37,9 +38,9 @@ const addToQueue = () => {
 
 <template>
     <article class="track-card" :class="{ 'track-card--active': active }">
-        <button type="button" class="track-card__media track-card__media-button" @click="toggleTrack">
+        <button type="button" class="track-card__media track-card__media-button" :disabled="track.is_playable === false" @click="toggleTrack">
             <img :src="track.cover_image_url" :alt="track.title" class="track-card__cover">
-            <span class="track-card__play" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
+            <span v-if="track.is_playable !== false" class="track-card__play" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
                 {{ isPlaying ? '❚❚' : '▶' }}
             </span>
         </button>
@@ -55,6 +56,7 @@ const addToQueue = () => {
                 <div class="track-card__artist">
                     <TrackArtists :track="track" />
                 </div>
+                <p v-if="track.is_playable === false" class="track-card__album">Аудио пока недоступно</p>
 
                 <p v-if="track.album" class="track-card__album">
                     <Link :href="`/albums/${track.album.slug}`" @click.stop>
@@ -65,7 +67,7 @@ const addToQueue = () => {
 
             <div class="track-card__footer">
                 <div class="track-card__controls">
-                    <button class="ghost-button ghost-button--small" type="button" @click.stop="addToQueue">
+                    <button class="ghost-button ghost-button--small" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
                         В очередь
                     </button>
                     <TrackInfoMenu :track="track" align="left" />

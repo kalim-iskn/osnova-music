@@ -41,12 +41,15 @@ class TrackResource extends JsonResource
             'id' => $this->id,
             'title' => $this->title,
             'show_url' => route('tracks.show', ['track' => $this->id]),
-            'duration_seconds' => (int) $this->duration_seconds,
+            'duration_seconds' => $this->duration_seconds !== null ? (int) $this->duration_seconds : null,
             'duration_human' => $this->duration_human,
             'audio_url' => $this->audio_url,
-            'playback_url' => route('tracks.stream', $this->resource),
+            'playback_url' => trim((string) $this->audio_url) !== '' ? route('tracks.stream', $this->resource) : null,
+            'is_playable' => trim((string) $this->audio_url) !== '',
             'cover_image_url' => $coverImageUrl,
-            'track_number' => $this->resource->pivot?->track_number ?? $this->track_number,
+            'track_number' => (int) ($this->resource->getAttributes()['_album_context_id'] ?? 0) > 0
+                ? $this->resource->pivot?->track_number
+                : ($this->resource->pivot?->track_number ?? $this->track_number),
             'is_downloaded' => (bool) $this->is_downloaded,
             'plays_count' => (int) ($this->plays_count ?? 0),
             'genius_pageviews' => (int) ($this->genius_pageviews ?? 0),

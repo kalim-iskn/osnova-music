@@ -27,7 +27,7 @@ const displayReleaseDate = computed(() => formatAlbumReleaseDate({
 const releaseTypeLabel = computed(() => ({ single: 'Сингл', album: 'Альбом', ep: 'EP', mixtape: 'Микстейп', compilation: 'Сборник' }[props.album?.release_type] ?? null));
 const albumArtists = computed(() => Array.isArray(props.album?.artists) && props.album.artists.length ? props.album.artists : (props.album?.artist ? [props.album.artist] : []));
 const player = usePlayerStore();
-const firstTrack = computed(() => trackItems.value[0] ?? null);
+const firstTrack = computed(() => trackItems.value.find((track) => track.is_playable !== false) ?? null);
 const isAlbumCurrent = computed(() => player.currentTrack?.id === firstTrack.value?.id);
 const isAlbumPlaying = computed(() => isAlbumCurrent.value && player.isPlaying);
 

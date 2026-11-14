@@ -34,6 +34,7 @@ class AlbumTrackPresentationTest extends TestCase
             'artist_id' => $artist->id,
             'album_id' => $primaryAlbum->id,
             'title' => 'Second by ID, first by release order',
+            'track_number' => 9,
             'duration_seconds' => 180,
             'audio_url' => 'https://audio.test/second.mp3',
         ]);
@@ -70,7 +71,9 @@ class AlbumTrackPresentationTest extends TestCase
         $this->get(route('albums.show', $shownAlbum->slug))
             ->assertInertia(fn (Assert $page) => $page
                 ->component('Albums/Show')
-                ->where('showTrackNumbers', false));
+                ->where('showTrackNumbers', true)
+                ->where('tracks.data.0.track_number', 1)
+                ->where('tracks.data.1.track_number', null));
 
         $wasStrict = Model::preventsAccessingMissingAttributes();
         Model::preventAccessingMissingAttributes();

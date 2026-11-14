@@ -14,6 +14,7 @@ final class ParsedArtistPage
         public array $tracks,
         /** @var array<int, array{url: string, title: string, complete: bool, tracks: array}> */
         public array $albumPages = [],
+        public ?string $sourceSlug = null,
     ) {
     }
 }

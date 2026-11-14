@@ -24,7 +24,7 @@ const totalTracks = computed(() => pagination.value?.meta?.total ?? trackItems.v
 const artistDescription = computed(() => runtime.value?.artist?.description_preview ?? props.artist.description_preview ?? null);
 const artistSocialLinks = computed(() => runtime.value?.artist?.social_links ?? {});
 const player = usePlayerStore();
-const firstTrack = computed(() => trackItems.value[0] ?? null);
+const firstTrack = computed(() => trackItems.value.find((track) => track.is_playable !== false) ?? null);
 const isArtistCurrent = computed(() => player.currentTrack?.id === firstTrack.value?.id);
 const isArtistPlaying = computed(() => isArtistCurrent.value && player.isPlaying);
 

@@ -5,7 +5,8 @@ const STORAGE_KEY = 'waveflow-player';
 const PLAY_REPORT_THRESHOLD = 8;
 const REPEAT_MODES = ['off', 'track', 'queue'];
 
-const resolvePlaybackUrl = (track) => track.playback_url ?? (track.id ? `/tracks/${track.id}/stream` : track.audio_url);
+const isPlayable = (track) => Boolean(track) && track.is_playable !== false && Boolean(track.audio_url || track.playback_url);
+const resolvePlaybackUrl = (track) => isPlayable(track) ? (track.playback_url ?? (track.id ? `/tracks/${track.id}/stream` : track.audio_url)) : null;
 
 const sanitizeTrack = (track) => ({
     id: track.id,
@@ -13,6 +14,7 @@ const sanitizeTrack = (track) => ({
     show_url: track.show_url ?? (track.id ? `/tracks/${track.id}` : null),
     audio_url: track.audio_url,
     playback_url: resolvePlaybackUrl(track),
+    is_playable: isPlayable(track),
     cover_image_url: track.cover_image_url,
     duration_seconds: Number(track.duration_seconds || 0),
     duration_human: track.duration_human ?? formatSeconds(track.duration_seconds || 0),
@@ -149,8 +151,10 @@ export const usePlayerStore = defineStore('player', {
 
             try {
                 const parsed = JSON.parse(raw);
-                this.queue = Array.isArray(parsed.queue) ? parsed.queue.map(sanitizeTrack) : [];
-                this.currentIndex = Number.isInteger(parsed.currentIndex) ? parsed.currentIndex : -1;
+                const storedQueue = Array.isArray(parsed.queue) ? parsed.queue : [];
+                const previousCurrent = Number.isInteger(parsed.currentIndex) ? storedQueue[parsed.currentIndex] : null;
+                this.queue = storedQueue.filter(isPlayable).map(sanitizeTrack);
+                this.currentIndex = previousCurrent ? this.queue.findIndex((track) => track.id === previousCurrent.id) : -1;
                 this.currentTime = Number(parsed.currentTime || 0);
                 this.duration = Number(parsed.duration || 0);
                 this.volume = Number(parsed.volume || 0.8);
@@ -178,10 +182,13 @@ export const usePlayerStore = defineStore('player', {
         },
 
         async playTrack(track, queue = null) {
+            if (!isPlayable(track)) {
+                return;
+            }
             const normalizedTrack = sanitizeTrack(track);
 
             if (Array.isArray(queue) && queue.length > 0) {
-                this.queue = queue.map(sanitizeTrack);
+                this.queue = queue.filter(isPlayable).map(sanitizeTrack);
                 this.currentIndex = this.queue.findIndex((item) => item.id === normalizedTrack.id);
 
                 if (this.currentIndex === -1) {
@@ -203,6 +210,9 @@ export const usePlayerStore = defineStore('player', {
         },
 
         addToQueue(track) {
+            if (!isPlayable(track)) {
+                return;
+            }
             const normalizedTrack = sanitizeTrack(track);
             const exists = this.queue.some((item) => item.id === normalizedTrack.id);
 

@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test:player": "node tests/player-unavailable.test.mjs"
   },
   "dependencies": {
     "@inertiajs/progress": "^0.2.7",

@@ -77,6 +77,19 @@ class MuzofondTrackParser
         return $this->isArtistsListingUrl($url);
     }
 
+    /** @return ParsedTrack[] */
+    public function searchSongCandidates(string $title, string $artist): array
+    {
+        $query = trim($title.' '.$artist);
+        if (trim($title) === '' || trim($artist) === '') {
+            return [];
+        }
+        $html = $this->fetchHtml(self::BASE_URL.'/music/'.rawurlencode($query));
+        return $this->uniqueTracksByAudioIdentity(
+            $this->extractTrackListItems($html, $artist, null, false, ParsedTrack::SOURCE_ARTIST_PAGE)
+        );
+    }
+
     /**
      * @return ParsedArtistPage[]
      */
@@ -243,6 +256,7 @@ class MuzofondTrackParser
             imageUrl: $imageUrl,
             tracks: $tracks,
             albumPages: $albumPages,
+            sourceSlug: $slug,
         );
     }
 
@@ -1184,6 +1198,9 @@ class MuzofondTrackParser
 
         foreach (array_merge($current->albumAppearances, $incoming->albumAppearances) as $appearance) {
             $key = GeniusNameMatcher::normalizeLoose((string) ($appearance['title'] ?? ''));
+            if ($key === '') {
+                $key = GeniusNameMatcher::canonicalTrack((string) ($appearance['title'] ?? ''));
+            }
 
             if ($key !== '' && ! isset($appearances[$key])) {
                 $appearances[$key] = $appearance;
@@ -1236,14 +1253,20 @@ class MuzofondTrackParser
     private function extractAlbumImageUrl(string $html): ?string
     {
         $xpath = $this->makeXPath($html);
-        $src = $this->firstNonEmptyAttribute($xpath, [
-            "//*[contains(concat(' ', normalize-space(@class), ' '), ' tracksHeader ')]//img/@data-src",
-            "//*[contains(concat(' ', normalize-space(@class), ' '), ' tracksHeader ')]//img/@src",
+        foreach ([
             "//meta[@property='og:image']/@content",
             "//meta[@name='twitter:image']/@content",
-        ]);
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' tracksHeader ')]//img/@data-src",
+            "//*[contains(concat(' ', normalize-space(@class), ' '), ' tracksHeader ')]//img/@src",
+        ] as $query) {
+            $src = $this->firstNonEmptyAttribute($xpath, [$query]);
+            $usable = $src !== null ? ArtworkUrl::usable($this->absoluteUrl($src)) : null;
+            if ($usable !== null) {
+                return $usable;
+            }
+        }
 
-        return $src !== null ? ArtworkUrl::usable($this->absoluteUrl($src)) : null;
+        return null;
     }
 
     private function parsedTrackPriorityScore(ParsedTrack $track): int

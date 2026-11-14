@@ -24,8 +24,7 @@ class AlbumController extends Controller
             ->first();
         $showTrackNumbers = $trackOrder
             && (int) $trackOrder->total > 0
-            && (int) $trackOrder->numbered === (int) $trackOrder->total
-            && (int) $trackOrder->positive_numbers === (int) $trackOrder->total;
+            && (int) $trackOrder->positive_numbers > 0;
 
         $tracks = $album->tracks()
             ->with(['artist', 'artists', 'album', 'album.artists', 'albums', 'albums.artists'])
