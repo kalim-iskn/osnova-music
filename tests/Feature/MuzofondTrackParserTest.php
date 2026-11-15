@@ -108,6 +108,19 @@ class MuzofondTrackParserTest extends TestCase
         $this->assertNull($recording->trackNumber);
     }
 
+    public function test_real_stromae_artist_page_keeps_explicit_featured_artist(): void
+    {
+        $html = file_get_contents(base_path('tests/Fixtures/stromae-muzofond-artist.html'));
+        $track = collect($this->extractTracks($html, 'Stromae'))->first(fn (ParsedTrack $track) => $track->audioFileId === '3565099');
+        $this->assertNotNull($track);
+        $this->assertSame('Alors On Danse (Featuring Erik Hassle)', $track->title);
+        $this->assertNull($track->albumTitle);
+        $this->assertSame('Alors On Danse (Featuring Erik Hassle)', \App\Services\Genius\GeniusNameMatcher::storageValue($track->title));
+        $plain = $this->extractTracks($this->trackHtml('Stromae', 'Alors On Danse (Featuring Erik Hassle)', '/feat.mp3', '03:31'), 'Stromae')[0];
+        $this->assertSame($track->title, $plain->title);
+        $this->assertNull($plain->albumTitle);
+    }
+
     public function test_duplicate_title_without_year_is_not_treated_as_an_album(): void
     {
         $tracks = $this->extractTracks($this->trackHtml('Example Artist', 'Example Song (Example Song)', '/song.mp3', '03:27'), 'Example Artist');

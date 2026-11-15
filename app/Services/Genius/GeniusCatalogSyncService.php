@@ -785,6 +785,9 @@ class GeniusCatalogSyncService
 
     private function durationAllowsSongCandidate(ParsedTrack $track, int $songId, ?array $song = null): bool
     {
+        if (is_array($song) && ! $this->explicitSourceGuestsMatchSong($track, $song)) {
+            return false;
+        }
         $identity = $this->sourceAudioVersionAnalyzer->identity($track);
         $ambiguous = $this->sourceAudioVersionAmbiguous($track);
         $partial = is_array($song) && $this->isPartialContainedSongTitle($track->title, (string) ($song['title'] ?? ''));
@@ -802,6 +805,7 @@ class GeniusCatalogSyncService
                     || (! $this->sourceTitlesCanCompeteForDuration($track->title, $other->title)
                         && ! ($partial && $this->sourceTitlesCanCompeteForDuration($other->title, (string) ($song['title'] ?? ''))))
                     || ! $this->songTitleMatchesParsedTrack($other, $song)
+                    || ! $this->explicitSourceGuestsMatchSong($other, $song)
                     || $this->sourceAlbumVersionConflictsWithSong($other, $song)
                     || (! $this->songAlbumMatchesParsedTrack($other, $song)
                         && ! $this->shouldAllowAlbumPageContextAlbumOverride($other, $song)
@@ -823,6 +827,21 @@ class GeniusCatalogSyncService
                     continue;
                 }
                 $otherDifference = abs($duration - $other->durationSeconds);
+                $limit = max(8.0, $duration * 0.05);
+                // Only prefer an album-page file over an unlabelled artist-page
+                // file when Genius confirms the exact song and position and both
+                // durations pass the same existing tolerance.
+                if ($difference <= $limit && $otherDifference <= $limit) {
+                    $verifiedSource = $this->sourceHasVerifiedGeniusAlbumSlot($track, $songId, $song);
+                    $verifiedOther = $this->sourceHasVerifiedGeniusAlbumSlot($other, $songId, $song);
+                    if ($verifiedSource && ! $verifiedOther && $this->sourceHasNoAlbumContext($other)) {
+                        continue;
+                    }
+                    if ($verifiedOther && ! $verifiedSource && $this->sourceHasNoAlbumContext($track)) {
+                        $conflictingSources[] = ['audio_id' => $other->audioFileId, 'duration_seconds' => $other->durationSeconds, 'difference_seconds' => round($otherDifference, 3)];
+                        continue;
+                    }
+                }
                 if ($otherDifference <= max(8.0, $duration * 0.05) && $otherDifference <= $difference) {
                     $conflictingSources[] = ['audio_id' => $other->audioFileId, 'duration_seconds' => $other->durationSeconds, 'difference_seconds' => round($otherDifference, 3)];
                 }
@@ -846,6 +865,38 @@ class GeniusCatalogSyncService
         return $allowed;
     }
 
+    private function sourceHasNoAlbumContext(ParsedTrack $source): bool
+    {
+        return $source->sourceType === ParsedTrack::SOURCE_ARTIST_PAGE
+            && trim((string) $source->albumTitle) === ''
+            && $source->albumAppearances === [];
+    }
+
+    private function sourceHasVerifiedGeniusAlbumSlot(ParsedTrack $source, int $songId, array $song): bool
+    {
+        $albumId = (int) data_get($song, 'album.id', 0);
+        $albumTitle = $this->extractSongAlbumTitle($song);
+        $tracklist = $this->albumTracklistResultCache[$albumId] ?? null;
+        if ($source->sourceType !== ParsedTrack::SOURCE_ALBUM_PAGE
+            || $source->trackNumber === null || $source->trackNumber <= 0
+            || $source->albumTitle === null || $albumTitle === null
+            || ! $this->albumTitlesMatchForReleaseResolution($source->albumTitle, $albumTitle)
+            || ! $tracklist instanceof AlbumTracklistResult || ! $tracklist->complete) {
+            return false;
+        }
+
+        $matches = [];
+        foreach ($tracklist->tracks as $entry) {
+            $entrySong = is_array($entry['song'] ?? null) ? $entry['song'] : $entry;
+            $number = (int) ($entry['number'] ?? $entry['track_number'] ?? $entry['song_number'] ?? $entry['disc_track_number'] ?? 0);
+            if ($number === $source->trackNumber) {
+                $matches[] = (int) ($entrySong['id'] ?? 0);
+            }
+        }
+
+        return count($matches) === 1 && $matches[0] === $songId;
+    }
+
     private function isPartialContainedSongTitle(string $sourceTitle, string $candidateTitle): bool
     {
         $source = GeniusNameMatcher::canonicalTrack($sourceTitle);
@@ -863,6 +914,38 @@ class GeniusCatalogSyncService
             GeniusNameMatcher::comparisonTrackTitles($left),
             GeniusNameMatcher::comparisonTrackTitles($right),
         ) !== [];
+    }
+
+    /** A guest explicitly named in the source title must also be credited by Genius. */
+    private function explicitSourceGuestsMatchSong(ParsedTrack $source, array $song): bool
+    {
+        if (! preg_match_all('/[\(\[]\s*(?:feat(?:uring)?|ft)\.?\s+([^\)\]]+)[\)\]]/iu', $source->title, $matches)) {
+            return true;
+        }
+
+        $songNames = $this->songArtistNames($song);
+        foreach (['title', 'title_with_featured'] as $field) {
+            if (preg_match_all('/[\(\[]\s*(?:feat(?:uring)?|ft)\.?\s+([^\)\]]+)[\)\]]/iu', (string) ($song[$field] ?? ''), $credits)) {
+                array_push($songNames, ...$credits[1]);
+            }
+        }
+
+        foreach ($matches[1] as $guest) {
+            if (GeniusNameMatcher::bestArtistScore($guest, $songNames) >= 0.985) {
+                continue;
+            }
+            $parts = preg_split('/\s*(?:,|;|\s+&\s+)\s*/u', $guest, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            if ($parts === []) {
+                return false;
+            }
+            foreach ($parts as $part) {
+                if (GeniusNameMatcher::bestArtistScore($part, $songNames) < 0.985) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     /**

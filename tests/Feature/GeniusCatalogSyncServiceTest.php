@@ -773,6 +773,82 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertSame(2, $client->requests);
     }
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('albumAndFeaturedSourceOrders')]
+    public function test_album_source_is_not_displaced_by_a_closer_explicit_featured_version(bool $featuredFirst): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $query): array { return [['id' => 77, 'name' => 'Stromae']]; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => 'Stromae']; }
+            public function allArtistAlbums(int $id): array { return [$this->album(11)]; }
+            public function allArtistSongs(int $id): array { return [$this->song(164798)]; }
+            public function searchSongs(string $query): array { return []; }
+            public function songAppleMusicDurationSeconds(int $id): ?float { return 213.52; }
+            public function album(int $id): ?array { return ['id' => $id, 'name' => 'Cheese', 'artist' => ['id' => 77, 'name' => 'Stromae']]; }
+            public function song(int $id): ?array { return ['id' => $id, 'title' => 'Alors on danse', 'primary_artist' => ['id' => 77, 'name' => 'Stromae'], 'featured_artists' => [], 'album' => $this->album(11)]; }
+            public function albumTracklistResult(int $id): \App\Services\Genius\AlbumTracklistResult {
+                return new \App\Services\Genius\AlbumTracklistResult([['number' => 5, 'song' => $this->song(164798)]], true);
+            }
+            public function albumTracksMany(array $ids): array { return [11 => $this->albumTracklistResult(11)->tracks]; }
+        };
+        $original = new ParsedTrack('Alors on danse', 206, 'https://audio.test/original.mp3', 'Cheese', 5, ['Stromae'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '3565061');
+        $featured = new ParsedTrack('Alors On Danse (Featuring Erik Hassle)', 211, 'https://audio.test/featured.mp3', null, null, ['Stromae'], audioFileId: '3565099');
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        $tracks = $featuredFirst ? [$featured, $original] : [$original, $featured];
+        (new GeniusCatalogSyncService($client))->syncArtistPage(new ParsedArtistPage('Stromae', 'stromae', null, $tracks));
+        $album = Album::query()->where('genius_id', 11)->firstOrFail();
+        $this->assertSame(['3565061'], $album->tracks()->pluck('muzofond_audio_id')->all());
+        $this->assertSame(164798, Track::query()->where('muzofond_audio_id', '3565061')->firstOrFail()->genius_id);
+        $this->assertNull(Track::query()->where('muzofond_audio_id', '3565099')->firstOrFail()->genius_id);
+        $this->assertSame('Alors On Danse (Featuring Erik Hassle)', Track::query()->where('muzofond_audio_id', '3565099')->firstOrFail()->muzofond_title);
+    }
+
+    public static function albumAndFeaturedSourceOrders(): array
+    {
+        return ['featured first' => [true], 'album first' => [false]];
+    }
+
+    public function test_explicit_featured_source_requires_the_guest_in_genius_credits(): void
+    {
+        $service = new GeniusCatalogSyncService(new class extends GeniusClient { public function __construct() {} });
+        $method = (new ReflectionClass($service))->getMethod('explicitSourceGuestsMatchSong');
+        $source = new ParsedTrack('Song (feat. Guest)', 200, 'https://audio.test/feat.mp3', null, artistNames: ['Artist']);
+        $original = ['title' => 'Song', 'primary_artist' => ['name' => 'Artist'], 'featured_artists' => []];
+        $featuring = array_replace($original, ['featured_artists' => [['name' => 'Guest']]]);
+        $this->assertFalse($method->invoke($service, $source, $original));
+        $this->assertTrue($method->invoke($service, $source, $featuring));
+        $this->assertTrue($method->invoke($service, new ParsedTrack('Song', 200, 'https://audio.test/original.mp3', null), $original));
+    }
+
+    public function test_confirmed_album_slot_precedes_an_unlabelled_artist_page_only_when_evidence_is_complete(): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function songAppleMusicDurationSeconds(int $id): ?float { return 213.52; }
+        };
+        $artist = Artist::query()->create(['name' => 'Stromae', 'slug' => 'stromae']);
+        $albumFile = new ParsedTrack('Alors on danse', 206, 'https://audio.test/album.mp3', 'Cheese', 5, ['Stromae'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $artistFile = new ParsedTrack('Alors on danse', 211, 'https://audio.test/artist.mp3', null, artistNames: ['Stromae'], audioFileId: '2');
+        $song = ['id' => 164798, 'title' => 'Alors on danse', 'album' => ['id' => 11, 'name' => 'Cheese'], 'primary_artist' => ['name' => 'Stromae']];
+        $service = new GeniusCatalogSyncService($client);
+        $r = new ReflectionClass($service);
+        $r->getMethod('primeSourceAudioVersions')->invoke($service, $artist, new ParsedArtistPage('Stromae', 'stromae', null, [$artistFile, $albumFile]));
+        $check = $r->getMethod('durationAllowsSongCandidate');
+        $result = fn (bool $complete, int $position = 5): \App\Services\Genius\AlbumTracklistResult => new \App\Services\Genius\AlbumTracklistResult([['number' => $position, 'song' => $song]], $complete);
+        $cache = $r->getProperty('albumTracklistResultCache');
+        $cache->setValue($service, [11 => $result(true)]);
+        $this->assertTrue($check->invoke($service, $albumFile, 164798, $song));
+        $this->assertFalse($check->invoke($service, $artistFile, 164798, $song));
+        $cache->setValue($service, [11 => $result(false)]);
+        $this->assertFalse($check->invoke($service, $albumFile, 164798, $song));
+        $this->assertTrue($check->invoke($service, $artistFile, 164798, $song));
+        $cache->setValue($service, [11 => $result(true, 6)]);
+        $this->assertFalse($check->invoke($service, $albumFile, 164798, $song));
+        $artistFile->albumTitle = 'Another release';
+        $cache->setValue($service, [11 => $result(true)]);
+        $this->assertTrue($check->invoke($service, $albumFile, 164798, $song));
+    }
+
     public function test_apple_check_runs_for_two_second_and_equal_length_files(): void
     {
         $client = new class extends GeniusClient {

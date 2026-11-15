@@ -160,7 +160,8 @@ class GeniusNameMatcher
             $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
             $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
 
-            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)) {
+            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)
+                || preg_match('/^(?:feat(?:uring)?|ft)\.?\s+\S/iu', $meta) === 1) {
                 break;
             }
 

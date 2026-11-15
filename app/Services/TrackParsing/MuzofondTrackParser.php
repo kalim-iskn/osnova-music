@@ -1617,7 +1617,8 @@ class MuzofondTrackParser
             return false;
         }
 
-        return preg_match('/\b(?:live|laiv|remix(?:es)?|remiks|mix(?:es)?|miks|instrumental|acoustic|akustika|karaoke|edit|radio\s+edit|remaster(?:ed)?|slowed?|slow|reverb(?:ed)?|speed\s*up|sped\s*up|nightcore)\b/iu', $normalizedMeta) === 1;
+        return preg_match('/^(?:feat(?:uring)?|ft)\s+\S/iu', $normalizedMeta) === 1
+            || preg_match('/\b(?:live|laiv|remix(?:es)?|remiks|mix(?:es)?|miks|instrumental|acoustic|akustika|karaoke|edit|radio\s+edit|remaster(?:ed)?|slowed?|slow|reverb(?:ed)?|speed\s*up|sped\s*up|nightcore)\b/iu', $normalizedMeta) === 1;
     }
 
     private function metaContainsRingtoneMarkers(string $normalizedMeta): bool
