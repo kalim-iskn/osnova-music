@@ -532,6 +532,82 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $this->assertFalse($compatible->invoke($service, 'Revenge (Deluxe Edition)', 'Revenge (Expanded Edition)'));
     }
 
+    public function test_album_part_and_deluxe_comparisons_do_not_collapse_distinct_releases(): void
+    {
+        $service = new GeniusCatalogSyncService(new class extends GeniusClient { public function __construct() {} });
+        $r = new ReflectionClass($service);
+        $identity = $r->getMethod('albumTitlesShareIdentity');
+        $strict = $r->getMethod('albumTitlesMatchForReleaseResolution');
+        $part1 = 'Нас узнает весь мир (Part 1)';
+        $part2 = 'Нас узнает весь мир (Part 2)';
+        $deluxe = 'Нас узнает весь мир (Part 1) (Deluxe Version)';
+        $this->assertFalse($identity->invoke($service, $part1, $part2));
+        $this->assertFalse($strict->invoke($service, $part1, $part2));
+        $this->assertFalse($identity->invoke($service, $part1, $deluxe));
+        $this->assertFalse($strict->invoke($service, $part1, $deluxe));
+        $this->assertTrue($strict->invoke($service, $part1, 'Нас узнает весь мир. Part 1'));
+        $this->assertFalse($strict->invoke($service, 'Нас узнает весь мир', $part1));
+    }
+
+    public function test_song_album_list_does_not_create_other_part_or_deluxe_without_source_evidence(): void
+    {
+        $artist = Artist::query()->create(['name' => 'Мари Краймбрери', 'slug' => 'mari', 'genius_id' => 91]);
+        $primary = Album::query()->create(['artist_id' => $artist->id, 'title' => 'Нас узнает весь мир (Part 1)', 'slug' => 'part-1', 'genius_id' => 101]);
+        $source = new ParsedTrack('Песня', 180, 'https://audio.test/1.mp3', 'Нас узнает весь мир. Part 1', 1, ['Мари Краймбрери'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $payload = ['id' => 5, 'album' => ['id' => 101, 'name' => 'Нас узнает весь мир (Part 1)'], 'albums' => [
+            ['id' => 102, 'name' => 'Нас узнает весь мир (Part 1) (Deluxe Version)'],
+            ['id' => 103, 'name' => 'Нас узнает весь мир (Part 2)'],
+        ]];
+        $client = new class extends GeniusClient { public function __construct() {} public function album(int $id): ?array { throw new \RuntimeException('Unexpected album fetch'); } };
+        $service = new GeniusCatalogSyncService($client);
+        $result = (new ReflectionClass($service))->getMethod('resolvedAdditionalTrackAlbums')->invoke($service, $artist, $source, $payload, $primary);
+        $this->assertSame([$primary->id], array_map(fn (Album $album) => $album->id, $result));
+        $this->assertSame(1, Album::query()->count());
+    }
+
+    public function test_file_from_one_part_is_not_attached_to_another_part_even_when_genius_lists_same_song(): void
+    {
+        $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist', 'genius_id' => 91]);
+        $album = Album::query()->create(['artist_id' => $artist->id, 'title' => 'Release (Part 2)', 'slug' => 'part-2', 'genius_id' => 102]);
+        $source = new ParsedTrack('Song', 180, 'https://audio.test/1.mp3', 'Release (Part 1)', 1, ['Artist'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $client = new class extends GeniusClient { public function __construct() {} public function albumTracklistResult(int $id): \App\Services\Genius\AlbumTracklistResult { return new \App\Services\Genius\AlbumTracklistResult([['number' => 1, 'song' => ['id' => 5, 'title' => 'Song']]], true); } };
+        $service = new GeniusCatalogSyncService($client);
+        $this->assertFalse((new ReflectionClass($service))->getMethod('albumTracklistAllows')->invoke($service, $album, $source, 5));
+    }
+
+    public function test_matching_muzofond_part_and_genius_part_reuses_existing_album(): void
+    {
+        $artist = Artist::query()->create(['name' => 'Мари Краймбрери', 'slug' => 'mari', 'genius_id' => 91]);
+        $existing = Album::query()->create(['artist_id' => $artist->id, 'title' => 'Нас узнает весь мир. Part 1', 'slug' => 'part-1']);
+        $source = new ParsedTrack('Песня', 180, 'https://audio.test/1.mp3', 'Нас узнает весь мир. Part 1', 1, ['Мари Краймбрери'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $albumPayload = ['id' => 101, 'name' => 'Нас узнает весь мир (Part 1)', 'artist' => ['id' => 91, 'name' => 'Мари Краймбрери']];
+        $song = ['id' => 5, 'title' => 'Песня', 'primary_artist' => ['id' => 91, 'name' => 'Мари Краймбрери'], 'album' => $albumPayload];
+        $client = new class($albumPayload, $song) extends GeniusClient {
+            public function __construct(private array $release, private array $songPayload) {}
+            public function album(int $id): ?array { return $this->release; }
+            public function artist(int $id): ?array { return ['id' => 91, 'name' => 'Мари Краймбрери']; }
+            public function allArtistAlbums(int $id): array { return [$this->release]; }
+            public function albumTracklistResult(int $id): \App\Services\Genius\AlbumTracklistResult { return new \App\Services\Genius\AlbumTracklistResult([['number' => 1, 'song' => $this->songPayload]], true); }
+        };
+        $service = new GeniusCatalogSyncService($client);
+        $album = (new ReflectionClass($service))->getMethod('resolveMatchedTrackAlbum')->invoke($service, $artist, $artist, $source, $song);
+        $this->assertSame($existing->id, $album?->id);
+        $this->assertSame(101, $album?->genius_id);
+        $this->assertSame(1, Album::query()->count());
+    }
+
+    public function test_ambiguous_identically_named_genius_albums_are_not_created_from_song_list(): void
+    {
+        $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist', 'genius_id' => 91]);
+        $source = new ParsedTrack('Song', 180, 'https://audio.test/1.mp3', 'Release (Part 1)', 1, ['Artist'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $song = ['id' => 5, 'albums' => [['id' => 101, 'name' => 'Release (Part 1)'], ['id' => 102, 'name' => 'Release (Part 1)']]];
+        $client = new class extends GeniusClient { public function __construct() {} public function album(int $id): ?array { throw new \RuntimeException('Ambiguous source must not create an album'); } };
+        $service = new GeniusCatalogSyncService($client);
+        $albums = (new ReflectionClass($service))->getMethod('resolvedAdditionalTrackAlbums')->invoke($service, $artist, $source, $song);
+        $this->assertSame([], $albums);
+        $this->assertSame(0, Album::query()->count());
+    }
+
     public function test_different_genius_album_ids_are_not_reassigned_by_equal_names(): void
     {
         $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist', 'genius_id' => 91]);
@@ -847,6 +923,165 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $artistFile->albumTitle = 'Another release';
         $cache->setValue($service, [11 => $result(true)]);
         $this->assertTrue($check->invoke($service, $albumFile, 164798, $song));
+    }
+
+    public function test_missing_apple_duration_allows_only_unambiguously_confirmed_album_slot(): void
+    {
+        $client = new class extends GeniusClient { public function __construct() {} public function songAppleMusicDurationSeconds(int $id): ?float { return null; } };
+        $artist = Artist::query()->create(['name' => 'Artik & Asti', 'slug' => 'artik-asti']);
+        $original = new ParsedTrack('Забудешь', 210, 'https://audio.test/album.mp3', '7', 1, ['Artik & Asti'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1', albumAppearances: [['title' => '7', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 1, 'source_url' => 'https://muzofond.fm/collections/albums/artik%20asti%207%20part%201']]);
+        $single = new ParsedTrack('Забудешь', 219, 'https://audio.test/single.mp3', 'Забудешь', 1, ['Artik & Asti'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '2');
+        $song = ['id' => 5, 'title' => 'Забудешь', 'album' => ['id' => 11, 'name' => '7 (Part 1)'], 'primary_artist' => ['name' => 'Artik & Asti']];
+        $service = new GeniusCatalogSyncService($client); $r = new ReflectionClass($service);
+        $r->getMethod('primeSourceAudioVersions')->invoke($service, $artist, new ParsedArtistPage('Artik & Asti', 'artik-asti', null, [$original, $single]));
+        $r->getProperty('albumTracklistResultCache')->setValue($service, [11 => new \App\Services\Genius\AlbumTracklistResult([['number' => 1, 'song' => $song]], true)]);
+        $check = $r->getMethod('durationAllowsSongCandidate');
+        $this->assertTrue($check->invoke($service, $original, 5, $song));
+        $this->assertFalse($check->invoke($service, $single, 5, $song));
+        $r->getProperty('albumTracklistResultCache')->setValue($service, [11 => new \App\Services\Genius\AlbumTracklistResult([['number' => 1, 'song' => $song]], false)]);
+        $this->assertFalse($check->invoke($service, $original, 5, $song));
+    }
+
+    public function test_album_track_is_matched_without_apple_duration_despite_distinct_single(): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $q): array { return [['id' => 91, 'name' => 'Artik & Asti']]; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => 'Artik & Asti']; }
+            public function allArtistAlbums(int $id): array { return [$this->album(11)]; }
+            public function allArtistSongs(int $id): array { return [$this->song(5)]; }
+            public function searchSongs(string $q): array { return []; }
+            public function songAppleMusicDurationSeconds(int $id): ?float { return null; }
+            public function album(int $id): ?array { return ['id' => 11, 'name' => '7 (Part 1)', 'artist' => ['id' => 91, 'name' => 'Artik & Asti']]; }
+            public function song(int $id): ?array { return ['id' => 5, 'title' => 'Забудешь', 'primary_artist' => ['id' => 91, 'name' => 'Artik & Asti'], 'featured_artists' => [], 'album' => $this->album(11)]; }
+            public function albumTracklistResult(int $id): \App\Services\Genius\AlbumTracklistResult { return new \App\Services\Genius\AlbumTracklistResult([['number' => 1, 'song' => $this->song(5)]], true); }
+            public function albumTracksMany(array $ids): array { return [11 => $this->albumTracklistResult(11)->tracks]; }
+        };
+        $original = new ParsedTrack('Забудешь', 210, 'https://audio.test/album.mp3', '7', 1, ['Artik & Asti'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1', albumAppearances: [['title' => '7', 'source_type' => ParsedTrack::SOURCE_ALBUM_PAGE, 'track_number' => 1, 'source_url' => 'https://muzofond.fm/collections/albums/artik%20asti%207%20part%201']]);
+        $single = new ParsedTrack('Забудешь', 219, 'https://audio.test/single.mp3', 'Забудешь', 1, ['Artik & Asti'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '2');
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        (new GeniusCatalogSyncService($client))->syncArtistPage(new ParsedArtistPage('Artik & Asti', 'artik-asti', null, [$original, $single]));
+        $track = Track::query()->where('muzofond_audio_id', '1')->firstOrFail();
+        $this->assertSame(5, $track->genius_id);
+        $this->assertSame(11, $track->albums()->firstOrFail()->genius_id);
+        $this->assertSame(2, Track::query()->count());
+    }
+
+    public function test_verified_various_artists_single_does_not_make_remixes_match(): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function album(int $id): ?array { return ['id' => $id, 'name' => 'Compilation', 'artist' => ['id' => 99, 'name' => 'Various Artists']]; }
+        };
+        $service = new GeniusCatalogSyncService($client); $r = new ReflectionClass($service);
+        $source = new ParsedTrack('Мне так хорошо', 207, 'https://audio.test/song.mp3', 'Мне так хорошо', 1, ['Мари Краймбрери'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE);
+        $song = ['id' => 5, 'title' => 'Мне так хорошо', 'primary_artist' => ['name' => 'Мари Краймбрери'], 'album' => ['id' => 12, 'name' => 'Первый танцевальный, Vol. 19']];
+        $this->assertTrue($r->getMethod('songAlbumMatchesParsedTrack')->invoke($service, $source, $song));
+        $this->assertTrue($r->getMethod('albumCandidateAllowed')->invoke($service, $source, $song, null));
+        $remix = new ParsedTrack('Мне так хорошо (DJ Remix)', 207, 'https://audio.test/remix.mp3', 'Мне так хорошо', 1, ['Мари Краймбрери'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE);
+        $this->assertFalse($r->getMethod('songTitleMatchesParsedTrack')->invoke($service, $remix, $song));
+    }
+
+    public function test_various_artists_song_can_match_an_explicit_muzofond_single(): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $q): array { return [['id' => 91, 'name' => 'Artist']]; }
+            public function artist(int $id): ?array { return ['id' => 91, 'name' => 'Artist']; }
+            public function allArtistAlbums(int $id): array { return []; }
+            public function artistAlbumCatalogIsComplete(): bool { return true; }
+            public function allArtistSongs(int $id): array { return [$this->song(5)]; }
+            public function searchSongs(string $q): array { return []; }
+            public function searchAlbums(string $q): ?array { return []; }
+            public function album(int $id): ?array { return ['id' => 12, 'name' => 'Compilation', 'artist' => ['id' => 99, 'name' => 'Various Artists']]; }
+            public function song(int $id): ?array { return ['id' => 5, 'title' => 'Song', 'primary_artist' => ['id' => 91, 'name' => 'Artist'], 'featured_artists' => [], 'album' => $this->album(12)]; }
+            public function albumTracksMany(array $ids): array { return []; }
+        };
+        $source = new ParsedTrack('Song', 200, 'https://audio.test/song.mp3', 'Song', 1, ['Artist'], sourceType: ParsedTrack::SOURCE_ALBUM_PAGE, audioFileId: '1');
+        $page = new ParsedArtistPage('Artist', 'artist', null, [$source], [['title' => 'Song', 'url' => 'https://muzofond.fm/collections/albums/artist-song', 'complete' => true, 'release_type' => 'single', 'tracks' => [$source]]]);
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        (new GeniusCatalogSyncService($client))->syncArtistPage($page);
+        $track = Track::query()->where('muzofond_audio_id', '1')->firstOrFail();
+        $this->assertSame(5, $track->genius_id);
+        $this->assertSame('single', $track->albums()->first()?->muzofond_album_type);
+        $this->assertDatabaseMissing('albums', ['genius_id' => 12]);
+    }
+
+    public function test_tsoi_page_uses_verified_kino_catalog_and_keeps_kino_as_performer(): void
+    {
+        Artist::query()->create(['name' => 'Виктор Цой', 'slug' => 'viktor-coi', 'genius_id' => 1116311]);
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $query): array { return [['id' => 1116311, 'name' => 'Виктор Цой']]; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => $id === 92 ? 'КИНО' : 'Виктор Цой']; }
+            public function allArtistAlbums(int $id): array { return []; }
+            public function allArtistSongs(int $id): array { return $id === 92 ? [$this->song(5)] : []; }
+            public function searchSongs(string $query): array { return []; }
+            public function song(int $id): ?array { return $id === 7599279 ? ['id' => $id, 'primary_artist' => ['id' => 92, 'name' => 'КИНО']] : ['id' => 5, 'title' => 'Хочу перемен', 'primary_artist' => ['id' => 92, 'name' => 'КИНО'], 'featured_artists' => []]; }
+        };
+        $source = new ParsedTrack('Хочу перемен', 250, 'https://audio.test/track.mp3', null, artistNames: ['Виктор Цой'], audioFileId: '1');
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        (new GeniusCatalogSyncService($client))->syncArtistPage(new ParsedArtistPage('Виктор Цой', 'viktor-coi', null, [$source], sourceSlug: 'Виктор Цой'));
+        $track = Track::query()->where('muzofond_audio_id', '1')->firstOrFail();
+        $this->assertSame(5, $track->genius_id);
+        $this->assertSame(92, (int) $track->artist->genius_id);
+    }
+
+    public function test_tsoi_page_does_not_load_related_catalog_if_anchor_artist_is_different(): void
+    {
+        $client = new class extends GeniusClient {
+            public array $catalogs = [];
+            public function __construct() {}
+            public function searchArtist(string $q): array { return [['id' => 1116311, 'name' => 'Виктор Цой']]; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => 'Виктор Цой']; }
+            public function allArtistAlbums(int $id): array { return []; }
+            public function allArtistSongs(int $id): array { $this->catalogs[] = $id; return []; }
+            public function searchSongs(string $q): array { return []; }
+            public function song(int $id): ?array { return ['id' => $id, 'primary_artist' => ['id' => 92, 'name' => 'Unrelated artist']]; }
+        };
+        $source = new ParsedTrack('Unknown', 200, 'https://audio.test/1.mp3', null, artistNames: ['Виктор Цой'], audioFileId: '1');
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        (new GeniusCatalogSyncService($client))->syncArtistPage(new ParsedArtistPage('Виктор Цой', 'viktor-coi', null, [$source]));
+        $this->assertSame([1116311], $client->catalogs);
+        $this->assertNull(Track::query()->where('muzofond_audio_id', '1')->firstOrFail()->genius_id);
+    }
+
+    public function test_fallback_sampling_uses_twenty_initial_misses_and_resumes_older_checkpoints(): void
+    {
+        $service = new GeniusCatalogSyncService(new class extends GeniusClient { public function __construct() {} });
+        $r = new ReflectionClass($service);
+        $service->setFallbackSamplingContext('test', ['miss_limit' => 10, 'consecutive_misses' => 10, 'stopped' => true, 'stop_reason' => 'initial_10_consecutive_misses']);
+        $state = $r->getProperty('fallbackSamplingState')->getValue($service);
+        $this->assertSame(20, $state['miss_limit']);
+        $this->assertSame(20, $state['initial_miss_limit']);
+        $this->assertSame(10, $state['consecutive_misses']);
+        $this->assertFalse($state['stopped']);
+        $this->assertNull($state['stop_reason']);
+        $service->setFallbackSamplingContext('test', ['miss_limit' => 30, 'consecutive_misses' => 30, 'tracks_matched' => 1, 'stopped' => true, 'stop_reason' => '30_consecutive_misses_after_match']);
+        $state = $r->getProperty('fallbackSamplingState')->getValue($service);
+        $this->assertSame(30, $state['miss_limit']);
+        $this->assertTrue($state['stopped']);
+    }
+
+    public function test_initial_fallback_stops_after_twenty_misses(): void
+    {
+        $client = new class extends GeniusClient { public function __construct() {} public function searchSongs(string $query): array { return []; } };
+        $service = new GeniusCatalogSyncService($client);
+        $service->setFallbackSamplingContext('test');
+        $r = new ReflectionClass($service);
+        $search = $r->getMethod('searchNoCatalogCandidateWithinBudget');
+        $page = new ParsedArtistPage('Artist', 'artist', null, []);
+        for ($i = 1; $i <= 20; $i++) {
+            $search->invoke($service, $page, new ParsedTrack('Song '.$i, 200, 'https://audio.test/'.$i.'.mp3', null, artistNames: ['Artist'], audioFileId: (string) $i), [], [], []);
+            $state = $r->getProperty('fallbackSamplingState')->getValue($service);
+            $this->assertSame($i, $state['consecutive_misses']);
+            $this->assertSame($i === 20, $state['stopped']);
+        }
+        $this->assertSame('initial_20_consecutive_misses', $state['stop_reason']);
+        $search->invoke($service, $page, new ParsedTrack('Song 21', 200, 'https://audio.test/21.mp3', null, artistNames: ['Artist'], audioFileId: '21'), [], [], []);
+        $state = $r->getProperty('fallbackSamplingState')->getValue($service);
+        $this->assertSame(20, $state['tracks_attempted']);
+        $this->assertSame(1, $state['tracks_skipped']);
     }
 
     public function test_apple_check_runs_for_two_second_and_equal_length_files(): void

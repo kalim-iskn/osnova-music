@@ -159,6 +159,78 @@ class UnavailableTrackTest extends TestCase
         Queue::assertPushedOn('tracks-parsing', FindMissingTrackAudioJob::class);
     }
 
+    public function test_confirmed_genius_album_without_source_page_creates_missing_song_only_once(): void
+    {
+        Queue::fake();
+        $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist', 'genius_id' => 91]);
+        $album = Album::query()->create(['artist_id' => $artist->id, 'title' => 'Release', 'slug' => 'release', 'genius_id' => 123]);
+        $song = ['id' => 456, 'title' => 'Missing', 'track_number' => 2, 'primary_artist' => ['id' => 91, 'name' => 'Artist'], 'album' => ['id' => 123, 'name' => 'Release']];
+        $client = new class($song) extends GeniusClient {
+            public function __construct(private array $songPayload) {}
+            public function album(int $id): ?array { return ['id' => $id, 'name' => 'Release', 'artist' => ['id' => 91, 'name' => 'Artist']]; }
+            public function song(int $id): ?array { return $this->songPayload; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => 'Artist']; }
+        };
+        $service = new GeniusCatalogSyncService($client); $r = new ReflectionClass($service);
+        $r->getProperty('albumTracklistResultCache')->setValue($service, [123 => new AlbumTracklistResult([['number' => 2, 'song' => $song]], true)]);
+        $r->getProperty('albumTrackSongCache')->setValue($service, [123 => [$song]]);
+        $page = new ParsedArtistPage('Artist', 'artist', null, []);
+        $r->getMethod('createMissingAlbumTracks')->invoke($service, $artist, $page);
+        $r->getMethod('createMissingAlbumTracks')->invoke($service, $artist, $page);
+        $this->assertSame(1, Track::query()->where('genius_id', 456)->count());
+        $this->assertSame(2, $album->tracks()->firstOrFail()->pivot->track_number);
+        Queue::assertPushed(FindMissingTrackAudioJob::class, 1);
+    }
+
+    public function test_sync_loads_missing_tracklist_for_matched_album_without_muzofond_page(): void
+    {
+        Queue::fake();
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $q): array { return [['id' => 91, 'name' => 'Artist']]; }
+            public function artist(int $id): ?array { return ['id' => 91, 'name' => 'Artist']; }
+            public function allArtistAlbums(int $id): array { return [$this->album(123)]; }
+            public function allArtistSongs(int $id): array { return [$this->song(456), $this->song(457)]; }
+            public function searchSongs(string $q): array { return []; }
+            public function album(int $id): ?array { return ['id' => 123, 'name' => 'Release', 'artist' => ['id' => 91, 'name' => 'Artist']]; }
+            public function song(int $id): ?array { return ['id' => $id, 'title' => $id === 456 ? 'Known' : 'Missing', 'primary_artist' => ['id' => 91, 'name' => 'Artist'], 'featured_artists' => [], 'album' => $this->album(123)]; }
+            public function albumTracklistResult(int $id): AlbumTracklistResult { return new AlbumTracklistResult([['number' => 1, 'song' => $this->song(456)], ['number' => 2, 'song' => $this->song(457)]], true); }
+            public function albumTracksMany(array $ids): array { return []; }
+            public function artistAlbumCatalogIsComplete(): bool { return true; }
+        };
+        $source = new ParsedTrack('Known', 200, 'https://audio.test/known.mp3', null, artistNames: ['Artist'], audioFileId: '1');
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
+        (new GeniusCatalogSyncService($client))->syncArtistPage(new ParsedArtistPage('Artist', 'artist', null, [$source]));
+        $album = Album::query()->where('genius_id', 123)->firstOrFail();
+        $this->assertSame(2, $album->tracks()->count());
+        $missing = Track::query()->where('genius_id', 457)->firstOrFail();
+        $this->assertNull($missing->audio_url);
+        Queue::assertPushed(FindMissingTrackAudioJob::class, 1);
+    }
+
+    public function test_genius_only_album_does_not_create_placeholders_for_other_artist_or_incomplete_tracklist(): void
+    {
+        Queue::fake();
+        $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist', 'genius_id' => 91]);
+        Album::query()->create(['artist_id' => $artist->id, 'title' => 'Release', 'slug' => 'release', 'genius_id' => 123]);
+        $song = ['id' => 456, 'title' => 'Missing', 'track_number' => 1, 'primary_artist' => ['id' => 91, 'name' => 'Artist']];
+        $client = new class extends GeniusClient {
+            public int $owner = 92;
+            public function __construct() {}
+            public function album(int $id): ?array { return ['id' => $id, 'name' => 'Release', 'artist' => ['id' => $this->owner, 'name' => 'Artist']]; }
+        };
+        $service = new GeniusCatalogSyncService($client); $r = new ReflectionClass($service);
+        $r->getProperty('albumTracklistResultCache')->setValue($service, [123 => new AlbumTracklistResult([['number' => 1, 'song' => $song]], true)]);
+        $r->getProperty('albumTrackSongCache')->setValue($service, [123 => [$song]]);
+        $page = new ParsedArtistPage('Artist', 'artist', null, []);
+        $r->getMethod('createMissingAlbumTracks')->invoke($service, $artist, $page);
+        $client->owner = 91;
+        $r->getProperty('albumTracklistResultCache')->setValue($service, [123 => new AlbumTracklistResult([['number' => 1, 'song' => $song]], false)]);
+        $r->getMethod('createMissingAlbumTracks')->invoke($service, $artist, $page);
+        $this->assertSame(0, Track::query()->count());
+        Queue::assertNothingPushed();
+    }
+
     public function test_found_but_unmatched_source_and_incomplete_album_never_create_placeholder(): void
     {
         Queue::fake();

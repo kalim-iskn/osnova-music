@@ -192,12 +192,22 @@ class GeniusNameMatcher
             '}' => ')',
         ]);
 
+        $releaseSuffixes = [];
         while (preg_match('/^(?P<base>.+?)\s*[\(\[\{](?P<meta>[^()\[\]{}]+)[\)\]\}]\s*$/u', $value, $matches) === 1) {
             $base = self::cleanWhitespace((string) ($matches['base'] ?? ''));
             $meta = self::cleanWhitespace((string) ($matches['meta'] ?? ''));
 
-            if ($base === '' || $meta === '' || self::isVersionDescriptor($meta)) {
+            if ($base === '' || $meta === '') {
                 break;
+            }
+
+            $normalizedMeta = self::normalizeLoose($meta);
+            if (self::isVersionDescriptor($meta)
+                || preg_match('/^(?:deluxe|expanded|bonus|complete|special|anniversary)\s+(?:version|edition)$/u', $normalizedMeta) === 1
+                || preg_match('/^(?:part|pt|vol|volume|chast)\s*(?:\d+|[ivx]+)(?:\s+(?:deluxe|expanded|bonus)(?:\s+(?:version|edition))?)?$/u', $normalizedMeta) === 1) {
+                array_unshift($releaseSuffixes, $meta);
+                $value = $base;
+                continue;
             }
 
             if (! self::looksLikeAlbumTranslationSuffix($base, $meta)) {
@@ -205,6 +215,10 @@ class GeniusNameMatcher
             }
 
             $value = $base;
+        }
+
+        foreach ($releaseSuffixes as $suffix) {
+            $value .= ' ('.$suffix.')';
         }
 
         $value = preg_replace('/\s{2,}/u', ' ', $value) ?? $value;

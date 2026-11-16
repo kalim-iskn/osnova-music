@@ -22,6 +22,17 @@ class GeniusNameMatcherTest extends TestCase
         $this->assertSame('Revenge (Other Songs)', GeniusNameMatcher::albumStorageValue('Revenge (Other Songs)'));
         $this->assertSame('БОГ РЭПА', GeniusNameMatcher::albumStorageValue('БОГ РЭПА (RAPGOD)'));
     }
+
+    public function test_album_part_and_version_are_preserved_while_translation_is_removed(): void
+    {
+        foreach (['Part 1', 'Part 2', 'Deluxe Version', 'Expanded Version', 'Complete Edition'] as $suffix) {
+            $title = "Нас узнает весь мир ({$suffix})";
+            $this->assertSame($title, GeniusNameMatcher::albumStorageValue($title));
+        }
+        $this->assertSame('Нас узнает весь мир (Part 1) (Deluxe Version)', GeniusNameMatcher::albumStorageValue('Нас узнает весь мир (Part 1) (Deluxe Version)'));
+        $this->assertSame('Нас узнает весь мир (Part 1)', GeniusNameMatcher::albumStorageValue('Нас узнает весь мир (The World Will Know Us) (Part 1)'));
+        $this->assertSame('БОГ РЭПА', GeniusNameMatcher::albumStorageValue('БОГ РЭПА (RAPGOD)'));
+    }
     public function test_normalize_stored_track_title_removes_invisible_markers(): void
     {
         $input = "\u{200C}\u{200D}\u{200D}xaNNy";
