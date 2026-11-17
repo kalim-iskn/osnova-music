@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue';
 import { router } from '@inertiajs/vue3';
+import AppIcon from './AppIcon.vue';
 
 const props = defineProps({
     initialQuery: {
@@ -34,7 +35,7 @@ const submit = () => {
 
 <template>
     <form class="search-box" @submit.prevent="submit">
-        <span class="search-box__icon" aria-hidden="true">⌕</span>
+        <AppIcon class="search-box__icon" name="search" :size="18" />
 
         <input
             v-model="query"
@@ -52,7 +53,8 @@ const submit = () => {
             :aria-label="compact ? 'Найти' : undefined"
             type="submit"
         >
-            {{ compact ? '⌕' : 'Найти' }}
+            <AppIcon v-if="compact" name="search" :size="17" />
+            <template v-else>Найти</template>
         </button>
     </form>
 </template>

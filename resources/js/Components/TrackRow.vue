@@ -4,7 +4,7 @@ import { Link } from '@inertiajs/vue3';
 import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
 import TrackArtists from './TrackArtists.vue';
-import TrackInfoMenu from './TrackInfoMenu.vue';
+import AppIcon from './AppIcon.vue';
 
 const props = defineProps({
     track: {
@@ -56,7 +56,7 @@ const addToQueue = () => {
         <button type="button" class="track-row__cover-button" :disabled="track.is_playable === false" @click="toggleTrack" :aria-label="track.is_playable === false ? 'Аудио пока недоступно' : (isPlaying ? 'Пауза' : 'Воспроизвести')">
             <img :src="track.cover_image_url" :alt="track.title" class="track-row__cover">
             <span v-if="track.is_playable !== false" class="track-row__cover-state">
-                {{ isPlaying ? '❚❚' : '▶' }}
+                <AppIcon :name="isPlaying ? 'pause' : 'play'" :size="16" />
             </span>
         </button>
 
@@ -85,7 +85,6 @@ const addToQueue = () => {
                 <button class="ghost-button ghost-button--small track-row__queue-button" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
                     В очередь
                 </button>
-                <TrackInfoMenu :track="track" />
                 <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
             </div>
 
@@ -253,11 +252,10 @@ const addToQueue = () => {
 
     .track-row__buttons {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 36px 36px;
+        grid-template-columns: minmax(0, 1fr) 36px;
         gap: 4px;
     }
 
-    .track-row__buttons :deep(.track-info-menu__button),
     .track-row__buttons :deep(.icon-button) {
         width: 36px;
         min-width: 36px;

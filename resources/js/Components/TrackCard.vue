@@ -4,7 +4,7 @@ import { Link } from '@inertiajs/vue3';
 import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
 import TrackArtists from './TrackArtists.vue';
-import TrackInfoMenu from './TrackInfoMenu.vue';
+import AppIcon from './AppIcon.vue';
 
 const props = defineProps({
     track: {
@@ -41,7 +41,7 @@ const addToQueue = () => {
         <button type="button" class="track-card__media track-card__media-button" :disabled="track.is_playable === false" @click="toggleTrack">
             <img :src="track.cover_image_url" :alt="track.title" class="track-card__cover">
             <span v-if="track.is_playable !== false" class="track-card__play" :aria-label="isPlaying ? 'Пауза' : 'Воспроизвести'">
-                {{ isPlaying ? '❚❚' : '▶' }}
+                <AppIcon :name="isPlaying ? 'pause' : 'play'" :size="18" />
             </span>
         </button>
 
@@ -70,7 +70,6 @@ const addToQueue = () => {
                     <button class="ghost-button ghost-button--small" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
                         В очередь
                     </button>
-                    <TrackInfoMenu :track="track" align="left" />
                     <LikeButton :track-id="track.id" icon-only />
                 </div>
 

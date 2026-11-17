@@ -1,18 +1,20 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import { formatCount } from '../utils/pluralize';
 import { usePlayerStore } from '../stores/player';
 import QueueDrawer from './QueueDrawer.vue';
 import LikeButton from './LikeButton.vue';
 import PlayerQueueList from './PlayerQueueList.vue';
 import TrackArtists from './TrackArtists.vue';
-import { formatSeconds } from '../utils/time';
+import AppIcon from './AppIcon.vue';
+import PlayerSeekBar from './PlayerSeekBar.vue';
 
 const audioRef = ref(null);
 const mobilePlayerScrollRef = ref(null);
 const mobileQueueSectionRef = ref(null);
 const player = usePlayerStore();
+const page = usePage();
 const isCompactViewport = ref(false);
 const isMobilePlayerOpen = ref(false);
 const isMobilePlayerFull = ref(false);
@@ -54,7 +56,7 @@ onBeforeUnmount(() => {
 
 const currentTrack = computed(() => player.currentTrack);
 const totalDuration = computed(() => player.duration || currentTrack.value?.duration_seconds || 0);
-const trackLengthLabel = computed(() => currentTrack.value?.duration_human ?? formatSeconds(totalDuration.value));
+const currentUrl = computed(() => page.url || '/');
 const progress = computed({
     get: () => Math.min(player.currentTime, totalDuration.value),
     set: (value) => player.seekTo(value),
@@ -158,6 +160,12 @@ watch(currentTrack, (track) => {
     }
 });
 
+watch(currentUrl, () => {
+    if (isMobilePlayerOpen.value) {
+        closeMobilePlayer();
+    }
+});
+
 watch(isMobilePlayerOpen, (isOpen) => {
     if (!isOpen) {
         document.body.style.overflow = '';
@@ -170,6 +178,16 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
     <div class="player-bar" :class="{ 'player-bar--empty': !currentTrack }">
         <audio ref="audioRef" preload="metadata"></audio>
+
+        <PlayerSeekBar
+            class="player-bar__edge-seek"
+            :value="progress"
+            :max="totalDuration"
+            :disabled="!currentTrack"
+            edge
+            @seek="progress = $event"
+            @click.stop
+        />
 
         <div class="player-bar__desktop">
             <div class="player-bar__main">
@@ -201,21 +219,22 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
                     <div class="player-bar__controls-wrap" aria-label="Управление плеером">
                         <div class="player-bar__controls">
-                            <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()">
-                                ⏮
+                            <button class="player-button" type="button" :disabled="!currentTrack" aria-label="Предыдущий трек" title="Предыдущий трек" @click="player.playPrevious()">
+                                <AppIcon name="previous" :size="21" />
                             </button>
 
                             <button
                                 class="player-button player-button--primary"
                                 type="button"
                                 :disabled="!currentTrack"
+                                :aria-label="player.isPlaying ? 'Пауза' : 'Воспроизвести'"
                                 @click="player.togglePlayback()"
                             >
-                                {{ player.isPlaying ? '❚❚' : '▶' }}
+                                <AppIcon :name="player.isPlaying ? 'pause' : 'play'" :size="22" />
                             </button>
 
-                            <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()">
-                                ⏭
+                            <button class="player-button" type="button" :disabled="!currentTrack" aria-label="Следующий трек" title="Следующий трек" @click="player.playNext()">
+                                <AppIcon name="next" :size="21" />
                             </button>
                         </div>
                     </div>
@@ -233,7 +252,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
                             :title="repeatLabel"
                             @click="player.cycleRepeatMode()"
                         >
-                            <span aria-hidden="true">↻</span>
+                            <AppIcon name="repeat" :size="20" />
                             <small v-if="player.repeatMode === 'track'">1</small>
                             <small v-else-if="player.repeatMode === 'queue'">Q</small>
                         </button>
@@ -241,8 +260,8 @@ watch(isMobilePlayerOpen, (isOpen) => {
                         <LikeButton v-if="currentTrack" :track-id="currentTrack.id" icon-only />
 
                         <label class="volume-control">
-                            <button class="icon-button player-bar__mute-button" type="button" :disabled="!currentTrack" @click="player.toggleMute()">
-                                <span aria-hidden="true">{{ player.isMuted ? '🔇' : '🔊' }}</span>
+                            <button class="icon-button player-bar__mute-button" type="button" :disabled="!currentTrack" :aria-label="player.isMuted ? 'Включить звук' : 'Выключить звук'" @click="player.toggleMute()">
+                                <AppIcon :name="player.isMuted ? 'mute' : 'volume'" :size="20" />
                             </button>
 
                             <input
@@ -258,26 +277,11 @@ watch(isMobilePlayerOpen, (isOpen) => {
                         </label>
 
                         <button class="ghost-button ghost-button--small player-bar__queue-button" type="button" @click="toggleQueueExperience">
-                            В очередь
+                            <AppIcon name="queue" :size="18" />
+                            Очередь
                             <span class="badge">{{ player.queue.length }}</span>
                         </button>
                     </div>
-                </div>
-
-                <div class="player-bar__timeline">
-                    <span>{{ formatSeconds(player.currentTime) }}</span>
-
-                    <input
-                        :value="progress"
-                        type="range"
-                        min="0"
-                        :max="totalDuration"
-                        step="1"
-                        :disabled="!currentTrack"
-                        @input="progress = Number($event.target.value)"
-                    >
-
-                    <span>{{ formatSeconds(totalDuration) }}</span>
                 </div>
             </div>
         </div>
@@ -301,9 +305,10 @@ watch(isMobilePlayerOpen, (isOpen) => {
                 class="player-button player-button--primary player-bar__mobile-play"
                 type="button"
                 :disabled="!currentTrack"
+                :aria-label="player.isPlaying ? 'Пауза' : 'Воспроизвести'"
                 @click.stop="player.togglePlayback()"
             >
-                {{ player.isPlaying ? '❚❚' : '▶' }}
+                <AppIcon :name="player.isPlaying ? 'pause' : 'play'" :size="21" />
             </button>
         </div>
     </div>
@@ -321,59 +326,53 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
                 <div ref="mobilePlayerScrollRef" class="mobile-player__scroll" @scroll="handleMobilePlayerScroll">
                     <div class="mobile-player__hero">
-                        <Link :href="currentTrack.show_url ?? `/tracks/${currentTrack.id}`" class="mobile-player__cover-link">
+                        <Link :href="currentTrack.show_url ?? `/tracks/${currentTrack.id}`" class="mobile-player__cover-link" @click="closeMobilePlayer">
                             <img :src="currentTrack.cover_image_url" :alt="currentTrack.title" class="mobile-player__cover">
                         </Link>
 
                         <div class="mobile-player__meta">
                             <strong class="mobile-player__title">
-                                <Link :href="currentTrack.show_url ?? `/tracks/${currentTrack.id}`">
+                                <Link :href="currentTrack.show_url ?? `/tracks/${currentTrack.id}`" @click="closeMobilePlayer">
                                     {{ currentTrack.title }}
                                 </Link>
                             </strong>
 
-                            <div class="mobile-player__artists">
+                            <div class="mobile-player__artists" @click="closeMobilePlayer">
                                 <TrackArtists :track="currentTrack" />
                             </div>
 
-                            <Link v-if="currentTrack.album" :href="`/albums/${currentTrack.album.slug}`" class="mobile-player__album-link">
+                            <Link v-if="currentTrack.album" :href="`/albums/${currentTrack.album.slug}`" class="mobile-player__album-link" @click="closeMobilePlayer">
                                 {{ currentTrack.album.title }}
                             </Link>
                         </div>
                     </div>
 
-                    <div class="mobile-player__timeline">
-                        <span>{{ formatSeconds(player.currentTime) }}</span>
-
-                        <input
-                            :value="progress"
-                            type="range"
-                            min="0"
-                            :max="totalDuration"
-                            step="1"
-                            :disabled="!currentTrack"
-                            @input="progress = Number($event.target.value)"
-                        >
-
-                        <span>{{ trackLengthLabel }}</span>
-                    </div>
+                    <PlayerSeekBar
+                        class="mobile-player__timeline"
+                        :value="progress"
+                        :max="totalDuration"
+                        :disabled="!currentTrack"
+                        show-times
+                        @seek="progress = $event"
+                    />
 
                     <div class="mobile-player__controls">
-                        <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playPrevious()">
-                            ⏮
+                        <button class="player-button" type="button" :disabled="!currentTrack" aria-label="Предыдущий трек" @click="player.playPrevious()">
+                            <AppIcon name="previous" :size="22" />
                         </button>
 
                         <button
                             class="player-button player-button--primary"
                             type="button"
                             :disabled="!currentTrack"
+                            :aria-label="player.isPlaying ? 'Пауза' : 'Воспроизвести'"
                             @click="player.togglePlayback()"
                         >
-                            {{ player.isPlaying ? '❚❚' : '▶' }}
+                            <AppIcon :name="player.isPlaying ? 'pause' : 'play'" :size="24" />
                         </button>
 
-                        <button class="player-button" type="button" :disabled="!currentTrack" @click="player.playNext()">
-                            ⏭
+                        <button class="player-button" type="button" :disabled="!currentTrack" aria-label="Следующий трек" @click="player.playNext()">
+                            <AppIcon name="next" :size="22" />
                         </button>
                     </div>
 
@@ -390,18 +389,19 @@ watch(isMobilePlayerOpen, (isOpen) => {
                             :title="repeatLabel"
                             @click="player.cycleRepeatMode()"
                         >
-                            <span aria-hidden="true">↻</span>
+                            <AppIcon name="repeat" :size="20" />
                             <small v-if="player.repeatMode === 'track'">1</small>
                             <small v-else-if="player.repeatMode === 'queue'">Q</small>
                         </button>
 
                         <LikeButton v-if="currentTrack" :track-id="currentTrack.id" icon-only />
 
-                        <button class="icon-button mobile-player__mute" type="button" :disabled="!currentTrack" @click="player.toggleMute()">
-                            <span aria-hidden="true">{{ player.isMuted ? '🔇' : '🔊' }}</span>
+                        <button class="icon-button mobile-player__mute" type="button" :disabled="!currentTrack" :aria-label="player.isMuted ? 'Включить звук' : 'Выключить звук'" @click="player.toggleMute()">
+                            <AppIcon :name="player.isMuted ? 'mute' : 'volume'" :size="20" />
                         </button>
 
                         <button class="ghost-button ghost-button--small mobile-player__queue-jump" type="button" @click="scrollQueueIntoView">
+                            <AppIcon name="queue" :size="18" />
                             Очередь
                             <span class="badge">{{ player.queue.length }}</span>
                         </button>
@@ -436,6 +436,11 @@ watch(isMobilePlayerOpen, (isOpen) => {
     display: block;
 }
 
+.player-bar__edge-seek {
+    --seek-track: #dfe4e2;
+    --seek-fill: #303b3d;
+}
+
 .player-bar__top {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -446,6 +451,10 @@ watch(isMobilePlayerOpen, (isOpen) => {
 .player-bar__track,
 .player-bar__meta {
     min-width: 0;
+}
+
+.player-bar__cover {
+    box-shadow: 0 4px 10px #0000003d;
 }
 
 .player-bar__title a,
@@ -473,10 +482,6 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
 .player-bar__secondary {
     justify-self: end;
-}
-
-.player-bar__timeline input {
-    cursor: pointer;
 }
 
 .player-bar__mobile-mini {
@@ -564,7 +569,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
     margin: 0 auto;
     object-fit: cover;
     border-radius: 28px;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.32);
+    box-shadow: 0 4px 10px #0000003d;
 }
 
 .mobile-player__meta {
@@ -585,7 +590,6 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
 .mobile-player__album-link { color: var(--text-soft); }
 
-.mobile-player__timeline,
 .mobile-player__controls,
 .mobile-player__actions {
     display: flex;
@@ -593,16 +597,8 @@ watch(isMobilePlayerOpen, (isOpen) => {
 }
 
 .mobile-player__timeline {
-    gap: 0.9rem;
-}
-
-.mobile-player__timeline input {
-    flex: 1 1 auto;
-}
-
-.mobile-player__timeline span {
-    font-variant-numeric: tabular-nums;
-    color: var(--text-soft);
+    --seek-track: #d8dedb;
+    --seek-fill: #303b3d;
 }
 
 .mobile-player__controls {
@@ -668,6 +664,10 @@ watch(isMobilePlayerOpen, (isOpen) => {
 }
 
 @media (max-width: 900px) {
+    .player-bar {
+        padding-top: 2px;
+    }
+
     .player-bar--empty {
         display: none;
     }
@@ -689,7 +689,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
         height: 52px;
         border-radius: 16px;
         object-fit: cover;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+        box-shadow: 0 4px 10px #0000003d;
     }
 
     .player-bar__mobile-meta {

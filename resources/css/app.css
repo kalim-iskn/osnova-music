@@ -2721,7 +2721,7 @@ body { background: var(--bg); color: var(--text); }
 .auth-panel h1,
 .auth-card h2 { color: var(--text); letter-spacing: -0.045em; }
 .section-heading h2 { font-size: clamp(1.35rem, 2vw, 1.65rem); }
-.section-heading__link { color: #657073; font-size: 0.88rem; font-weight: 600; white-space: nowrap; }
+.section-heading__link { display: inline-flex; align-items: center; gap: 2px; color: #657073; font-size: 0.88rem; font-weight: 600; white-space: nowrap; }
 .section-heading__link:hover { color: #252e31; }
 .home-section { display: grid; gap: 13px; }
 .home-track-list { gap: 0; }
@@ -2880,7 +2880,7 @@ body { background: var(--bg); color: var(--text); }
     border: 1px solid #e0e5e3;
     border-bottom: 0;
     border-radius: 16px 16px 0 0;
-    box-shadow: 0 -6px 28px rgba(25, 35, 35, 0.08);
+    box-shadow: 0 -4px 22px rgba(25, 35, 35, 0.07);
     backdrop-filter: blur(18px);
 }
 .player-bar__title { color: #273033; }
@@ -2891,13 +2891,17 @@ body { background: var(--bg); color: var(--text); }
 .player-button--primary { color: #fff; background: var(--primary); }
 .player-bar input[type='range'],
 .mobile-player input[type='range'] { accent-color: #4b585b; }
-.player-bar__queue-button { color: #303a3c; background: #edf0ef; border-color: #e0e5e3; }
+.player-bar__queue-button { display: inline-flex; align-items: center; gap: 7px; color: #303a3c; background: #edf0ef; border-color: #e0e5e3; }
+.player-bar__repeat-button--active { color: #fff; background: #303b3d; border-color: #303b3d; }
+.player-bar__repeat-button--queue { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24); }
 .mobile-player__sheet { color: var(--text); background: #f7f8f7; }
 .mobile-player__grabber span { background: #c4cbca; }
 .mobile-player__album-link,
 .mobile-player__timeline span,
 .mobile-player__queue-heading p { color: #727d7f; }
-.mobile-player__cover { box-shadow: 0 14px 30px rgba(30, 42, 40, 0.12); }
+.player-bar__cover,
+.player-bar__mobile-cover,
+.mobile-player__cover { box-shadow: 0 4px 10px #0000003d; }
 
 .flash-message { color: #364144; background: #fff; border-color: var(--border); }
 .form-field input { color: var(--text); background: #fff; border-color: #dce2df; }

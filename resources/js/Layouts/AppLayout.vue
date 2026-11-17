@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import SearchBox from '../Components/SearchBox.vue';
 import PlayerBar from '../Components/PlayerBar.vue';
+import AppIcon from '../Components/AppIcon.vue';
 
 const page = usePage();
 
@@ -68,7 +69,7 @@ watch(currentUrl, () => {
             <div class="container site-header__inner">
                 <div class="site-header__bar">
                     <Link href="/" class="brand">
-                        <span class="brand__badge">♫</span>
+                        <span class="brand__badge"><AppIcon name="music" :size="21" /></span>
                         <span class="brand__text">
                             <strong>{{ appName }}</strong>
                             <small>музыка рядом</small>
@@ -96,7 +97,7 @@ watch(currentUrl, () => {
                                     <span class="user-chip__avatar" :aria-label="`Профиль: ${user.name}`">
                                         {{ user.name.slice(0, 1).toUpperCase() }}
                                     </span>
-                                    <span class="profile-menu__caret" aria-hidden="true">▾</span>
+                                    <span class="profile-menu__caret"><AppIcon name="chevronDown" :size="15" /></span>
                                 </button>
 
                                 <div v-if="isProfileMenuOpen" class="profile-menu__panel">
@@ -124,8 +125,8 @@ watch(currentUrl, () => {
                             <Link href="/register" class="primary-button primary-button--small header-actions-mobile__auth">Регистрация</Link>
                         </template>
 
-                        <button class="icon-button mobile-menu-toggle" type="button" @click="toggleMobileMenu">
-                            {{ isMobileMenuOpen ? '✕' : '☰' }}
+                        <button class="icon-button mobile-menu-toggle" type="button" :aria-label="isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'" @click="toggleMobileMenu">
+                            <AppIcon :name="isMobileMenuOpen ? 'close' : 'menu'" :size="20" />
                         </button>
                     </div>
                 </div>

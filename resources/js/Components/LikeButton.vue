@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { router, usePage } from '@inertiajs/vue3';
+import AppIcon from './AppIcon.vue';
 
 const props = defineProps({
     trackId: {
@@ -48,9 +49,11 @@ const toggle = async () => {
         class="icon-button"
         :class="{ 'icon-button--liked': liked }"
         :disabled="processing"
+        :aria-label="liked ? 'Убрать из любимых' : 'Добавить в любимые'"
+        :title="liked ? 'Убрать из любимых' : 'Добавить в любимые'"
         @click="toggle"
     >
-        <span aria-hidden="true">{{ liked ? '♥' : '♡' }}</span>
+        <AppIcon :name="liked ? 'heartFilled' : 'heart'" :size="20" :stroke-width="1.7" />
         <span v-if="!iconOnly">{{ liked ? 'В моих треках' : 'Лайк' }}</span>
     </button>
 </template>

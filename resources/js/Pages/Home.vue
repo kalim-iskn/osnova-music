@@ -5,6 +5,7 @@ import AppLayout from '../Layouts/AppLayout.vue';
 import TrackArtists from '../Components/TrackArtists.vue';
 import TrackRow from '../Components/TrackRow.vue';
 import { usePlayerStore } from '../stores/player';
+import AppIcon from '../Components/AppIcon.vue';
 
 defineOptions({ layout: AppLayout });
 
@@ -47,8 +48,8 @@ const playLeadTrack = async () => {
             <h2>{{ leadTrack.title }}</h2>
             <p><TrackArtists :track="leadTrack" /></p>
             <div class="home-featured-track__controls">
-                <button class="player-button player-button--primary" type="button" @click="playLeadTrack">
-                    {{ leadTrackIsPlaying ? '❚❚' : '▶' }}
+                <button class="player-button player-button--primary" type="button" :aria-label="leadTrackIsPlaying ? 'Пауза' : 'Воспроизвести'" @click="playLeadTrack">
+                    <AppIcon :name="leadTrackIsPlaying ? 'pause' : 'play'" :size="20" />
                 </button>
                 <span>{{ leadTrack.duration_human }}</span>
             </div>
@@ -61,7 +62,7 @@ const playLeadTrack = async () => {
             <div>
                 <h2>Популярные треки</h2>
             </div>
-            <Link href="/search" class="section-heading__link">Весь каталог <span aria-hidden="true">→</span></Link>
+            <Link href="/search" class="section-heading__link">Весь каталог <AppIcon name="chevronRight" :size="15" /></Link>
         </div>
 
         <div class="track-list home-track-list">
@@ -74,7 +75,7 @@ const playLeadTrack = async () => {
             <div>
                 <h2>Свежие альбомы</h2>
             </div>
-            <Link href="/search" class="section-heading__link">Открыть поиск <span aria-hidden="true">→</span></Link>
+            <Link href="/search" class="section-heading__link">Открыть поиск <AppIcon name="chevronRight" :size="15" /></Link>
         </div>
 
         <div class="album-grid album-grid--home">
