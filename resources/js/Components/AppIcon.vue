@@ -29,6 +29,7 @@ const icons = {
     queue: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6h.01', 'M4 12h.01', 'M4 18h.01'],
     close: ['M18 6 6 18', 'M6 6l12 12'],
     menu: ['M4 7h16', 'M4 12h16', 'M4 17h16'],
+    moreHorizontal: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
     chevronDown: ['m6 9 6 6 6-6'],
     chevronRight: ['m9 18 6-6-6-6'],
     music: ['M9 18V5l10-2v13', 'M9 9l10-2', 'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z', 'M16 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'],

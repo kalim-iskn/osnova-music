@@ -46,8 +46,15 @@ const startScrubbing = () => {
     isScrubbing.value = true;
 };
 
-const stopScrubbing = () => {
+const stopScrubbing = (event) => {
     isScrubbing.value = false;
+
+    // Native range inputs keep mouse focus after a drag. Drop that focus after
+    // pointer interaction so :focus-within cannot leave the tooltip stuck;
+    // keyboard focus remains intact for accessible seeking.
+    if (event?.type === 'pointerup' || event?.type === 'pointercancel') {
+        event.currentTarget?.blur?.();
+    }
 };
 </script>
 
@@ -70,7 +77,7 @@ const stopScrubbing = () => {
             </span>
 
             <span class="seek-bar__tooltip" aria-hidden="true">
-                {{ formatSeconds(displayedValue) }}
+                {{ formatSeconds(displayedValue) }} / {{ formatSeconds(safeMax) }}
             </span>
 
             <input
@@ -206,7 +213,7 @@ const stopScrubbing = () => {
 .seek-bar__tooltip {
     position: absolute;
     z-index: 3;
-    left: clamp(24px, var(--seek-progress), calc(100% - 24px));
+    left: clamp(48px, var(--seek-progress), calc(100% - 48px));
     bottom: 26px;
     padding: 5px 7px;
     border-radius: 7px;
@@ -214,6 +221,7 @@ const stopScrubbing = () => {
     background: #293235;
     font-size: 0.72rem;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     line-height: 1;
     opacity: 0;
     pointer-events: none;
@@ -243,7 +251,7 @@ const stopScrubbing = () => {
 .seek-bar--edge {
     position: absolute;
     z-index: 4;
-    top: -13px;
+    top: calc(-13px + var(--seek-edge-adjust, 0px));
     left: 0;
     right: 0;
 }
@@ -285,7 +293,7 @@ const stopScrubbing = () => {
     }
 
     .seek-bar--edge {
-        top: -18px;
+        top: calc(-18px + var(--seek-edge-adjust, 0px));
     }
 }
 </style>

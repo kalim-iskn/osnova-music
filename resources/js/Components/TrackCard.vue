@@ -5,6 +5,8 @@ import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
 import TrackArtists from './TrackArtists.vue';
 import AppIcon from './AppIcon.vue';
+import MarqueeText from './MarqueeText.vue';
+import TrackActionsMenu from './TrackActionsMenu.vue';
 
 const props = defineProps({
     track: {
@@ -31,9 +33,6 @@ const toggleTrack = async () => {
     await player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
 };
 
-const addToQueue = () => {
-    player.addToQueue(props.track);
-};
 </script>
 
 <template>
@@ -48,32 +47,31 @@ const addToQueue = () => {
         <div class="track-card__body">
             <div class="track-card__meta">
                 <h3 class="track-card__title">
-                    <Link :href="track.show_url ?? `/tracks/${track.id}`">
-                        {{ track.title }}
-                    </Link>
+                    <MarqueeText>
+                        <Link :href="track.show_url ?? `/tracks/${track.id}`">
+                            {{ track.title }}
+                        </Link>
+                    </MarqueeText>
                 </h3>
 
-                <div class="track-card__artist">
+                <MarqueeText class="track-card__artist">
                     <TrackArtists :track="track" />
-                </div>
-                <p v-if="track.is_playable === false" class="track-card__album">Аудио пока недоступно</p>
+                </MarqueeText>
+                <MarqueeText v-if="track.is_playable === false" class="track-card__album">Аудио пока недоступно</MarqueeText>
 
-                <p v-if="track.album" class="track-card__album">
+                <MarqueeText v-if="track.album" class="track-card__album">
                     <Link :href="`/albums/${track.album.slug}`" @click.stop>
                         {{ track.album.title }}
                     </Link>
-                </p>
+                </MarqueeText>
             </div>
 
             <div class="track-card__footer">
-                <div class="track-card__controls">
-                    <button class="ghost-button ghost-button--small" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
-                        В очередь
-                    </button>
-                    <LikeButton :track-id="track.id" icon-only />
-                </div>
-
                 <span class="track-card__duration">{{ track.duration_human }}</span>
+                <div class="track-card__controls">
+                    <LikeButton :track-id="track.id" icon-only />
+                    <TrackActionsMenu :track="track" />
+                </div>
             </div>
         </div>
     </article>
@@ -153,15 +151,9 @@ const addToQueue = () => {
     letter-spacing: -0.02em;
 }
 
-.track-card__title a {
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
-
 .track-card__title a,
 .track-card__album a {
+    display: inline-block;
     color: inherit;
     text-decoration: none;
 }
@@ -180,12 +172,13 @@ const addToQueue = () => {
 
 .track-card__footer {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 8px;
     margin-top: auto;
     min-width: 0;
     overflow: visible;
+    justify-content: space-between;
 }
 
 .track-card__controls {
@@ -197,14 +190,8 @@ const addToQueue = () => {
     flex-wrap: nowrap;
 }
 
-.track-card__controls :deep(.ghost-button--small) {
-    padding: 8px 11px;
-    font-size: 0.82rem;
-}
-
 .track-card__duration {
     flex: 0 0 auto;
-    margin-left: auto;
     color: var(--text-soft);
     white-space: nowrap;
     font-size: 0.82rem;

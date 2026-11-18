@@ -226,6 +226,65 @@ export const usePlayerStore = defineStore('player', {
             }
         },
 
+        queueTrackAt(track, targetIndex) {
+            if (!isPlayable(track) || !Number.isInteger(targetIndex)) {
+                return false;
+            }
+
+            const normalizedTrack = sanitizeTrack(track);
+            const existingIndex = this.queue.findIndex((item) => item.id === normalizedTrack.id);
+
+            if (existingIndex === this.currentIndex) {
+                return false;
+            }
+
+            let queuedTrack = normalizedTrack;
+
+            if (existingIndex !== -1) {
+                [queuedTrack] = this.queue.splice(existingIndex, 1);
+
+                if (existingIndex < this.currentIndex) {
+                    this.currentIndex -= 1;
+                }
+
+                if (existingIndex < targetIndex) {
+                    targetIndex -= 1;
+                }
+            }
+
+            const insertIndex = Math.max(0, Math.min(targetIndex, this.queue.length));
+            this.queue.splice(insertIndex, 0, queuedTrack);
+
+            if (this.currentIndex === -1) {
+                this.currentIndex = 0;
+            } else if (insertIndex <= this.currentIndex) {
+                this.currentIndex += 1;
+            }
+
+            this.persist();
+            return true;
+        },
+
+        queueTrackNext(track) {
+            return this.queueTrackAt(track, this.currentIndex < 0 ? 0 : this.currentIndex + 1);
+        },
+
+        queueTrackEnd(track) {
+            return this.queueTrackAt(track, this.queue.length);
+        },
+
+        queueTrackAfter(track, afterIndex) {
+            if (!Number.isInteger(afterIndex) || afterIndex < 0 || afterIndex >= this.queue.length) {
+                return false;
+            }
+
+            if (this.queue[afterIndex]?.id === track?.id) {
+                return false;
+            }
+
+            return this.queueTrackAt(track, afterIndex + 1);
+        },
+
         async loadCurrentTrack(autoplay = false) {
             const track = this.currentTrack;
 

@@ -18,6 +18,8 @@ let pointerFrame = 0;
 let pendingClientY = 0;
 let initialRects = [];
 let initialScrollTop = 0;
+let dragScrollElement = null;
+let dragDirection = 0;
 const dropHysteresis = 10;
 
 const queue = computed(() => player.queue);
@@ -31,6 +33,23 @@ const dropDirection = computed(() => {
 });
 
 const getListElement = () => listRef.value?.$el ?? listRef.value;
+
+const getScrollableParent = (element) => {
+    let candidate = element;
+
+    while (candidate && candidate !== document.body) {
+        const overflowY = window.getComputedStyle(candidate).overflowY;
+        const canScroll = /(auto|scroll)/.test(overflowY) && candidate.scrollHeight > candidate.clientHeight + 1;
+
+        if (canScroll) {
+            return candidate;
+        }
+
+        candidate = candidate.parentElement;
+    }
+
+    return document.scrollingElement;
+};
 
 const setItemRef = (element, index) => {
     if (element) {
@@ -50,28 +69,56 @@ const resetDragState = () => {
     draggedItemHeight.value = 0;
     draggedRect.value = null;
     initialRects = [];
+    dragScrollElement = null;
+    dragDirection = 0;
     document.body.style.userSelect = '';
 };
 
 const scrollListNearEdge = (clientY) => {
-    const list = getListElement();
+    const scrollElement = dragScrollElement;
 
-    if (!list) {
+    if (!scrollElement) {
+        return false;
+    }
+
+    const rect = scrollElement.getBoundingClientRect();
+    const edgeSize = Math.min(220, Math.max(84, rect.height * 0.3));
+    let delta = 0;
+
+    if (dragDirection <= 0 && clientY < rect.top + edgeSize) {
+        const proximity = Math.min(1, (rect.top + edgeSize - clientY) / edgeSize);
+        delta = -Math.ceil(4 + proximity * 48);
+    } else if (dragDirection >= 0 && clientY > rect.bottom - edgeSize) {
+        const proximity = Math.min(1, (clientY - (rect.bottom - edgeSize)) / edgeSize);
+        delta = Math.ceil(4 + proximity * 48);
+    }
+
+    if (delta === 0) {
+        return false;
+    }
+
+    const previousScrollTop = scrollElement.scrollTop;
+    scrollElement.scrollTop += delta;
+
+    return scrollElement.scrollTop !== previousScrollTop;
+};
+
+const processPointerFrame = () => {
+    pointerFrame = 0;
+
+    if (!isPointerDragging.value || dragIndex.value === null) {
         return;
     }
 
-    const rect = list.getBoundingClientRect();
-    const edgeSize = Math.min(72, rect.height * 0.22);
-    let delta = 0;
+    pointerCurrentY.value = pendingClientY;
+    const didScroll = scrollListNearEdge(pendingClientY);
+    dropIndex.value = resolveDropIndex(pendingClientY);
 
-    if (clientY < rect.top + edgeSize) {
-        delta = -Math.ceil((rect.top + edgeSize - clientY) / 5);
-    } else if (clientY > rect.bottom - edgeSize) {
-        delta = Math.ceil((clientY - (rect.bottom - edgeSize)) / 5);
-    }
-
-    if (delta !== 0) {
-        list.scrollTop += Math.max(-18, Math.min(18, delta));
+    // Keep scrolling while the pointer stays at an edge. Pointermove events
+    // stop when the finger is held still, so a one-shot update cannot move a
+    // track through a long queue.
+    if (didScroll) {
+        pointerFrame = requestAnimationFrame(processPointerFrame);
     }
 };
 
@@ -81,18 +128,19 @@ const onPointerMove = (event) => {
     }
 
     event.preventDefault();
+    const movement = event.clientY - pendingClientY;
+
+    if (Math.abs(movement) >= 1) {
+        dragDirection = Math.sign(movement);
+    }
+
     pendingClientY = event.clientY;
 
     if (pointerFrame) {
         return;
     }
 
-    pointerFrame = requestAnimationFrame(() => {
-        pointerFrame = 0;
-        pointerCurrentY.value = pendingClientY;
-        scrollListNearEdge(pendingClientY);
-        dropIndex.value = resolveDropIndex(pendingClientY);
-    });
+    pointerFrame = requestAnimationFrame(processPointerFrame);
 };
 
 const onPointerUp = (event) => {
@@ -103,7 +151,20 @@ const onPointerUp = (event) => {
 
     if (dragIndex.value !== null && Number.isFinite(event?.clientY)) {
         pointerCurrentY.value = event.clientY;
-        const finalIndex = resolveDropIndex(event.clientY);
+        const scrollRect = dragScrollElement?.getBoundingClientRect();
+        const atTopEdge = scrollRect && event.clientY <= scrollRect.top + 36;
+        const atBottomEdge = scrollRect && event.clientY >= scrollRect.bottom - 36;
+        let finalIndex = resolveDropIndex(event.clientY);
+
+        // A deliberate release at the extreme edge is a quick "move to end"
+        // gesture. It avoids making the user wait through the whole scroll for
+        // a long queue while regular near-edge dragging still autoscrolls.
+        if (atTopEdge && (dragScrollElement?.scrollTop ?? 0) > 0) {
+            finalIndex = 0;
+        } else if (atBottomEdge && dragScrollElement
+            && dragScrollElement.scrollTop < dragScrollElement.scrollHeight - dragScrollElement.clientHeight - 1) {
+            finalIndex = queue.value.length - 1;
+        }
 
         if (finalIndex !== dragIndex.value) {
             player.moveQueueItem(dragIndex.value, finalIndex);
@@ -140,15 +201,16 @@ const resolveDropIndex = (clientY, currentIndex = dropIndex.value) => {
         return dragIndex.value;
     }
 
-    const list = getListElement();
-    const scrollDelta = (list?.scrollTop ?? 0) - initialScrollTop;
+    const scrollDelta = (dragScrollElement?.scrollTop ?? 0) - initialScrollTop;
     const draggedRect = initialRects.find((entry) => entry.index === dragIndex.value)?.rect;
 
     if (!draggedRect) {
         return dragIndex.value;
     }
 
-    const draggedCenter = draggedRect.top + draggedRect.height / 2 + (clientY - pointerStartY.value) - scrollDelta;
+    // The floating preview remains under the pointer while the content scrolls,
+    // therefore only the queue rows move by scrollDelta.
+    const draggedCenter = draggedRect.top + draggedRect.height / 2 + (clientY - pointerStartY.value);
     const remainingRects = initialRects.filter((entry) => entry.index !== dragIndex.value);
     let resolvedIndex = Math.max(0, Math.min(currentIndex ?? dragIndex.value, remainingRects.length));
 
@@ -207,7 +269,9 @@ const startPointerDrag = (index, event) => {
         width: initialDraggedRect.width,
         height: initialDraggedRect.height,
     } : null;
-    initialScrollTop = getListElement()?.scrollTop ?? 0;
+    dragScrollElement = getScrollableParent(getListElement());
+    initialScrollTop = dragScrollElement?.scrollTop ?? 0;
+    pendingClientY = event.clientY;
     document.body.style.userSelect = 'none';
 
     event.currentTarget?.setPointerCapture?.(event.pointerId);

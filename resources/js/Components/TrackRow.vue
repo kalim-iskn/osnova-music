@@ -5,6 +5,8 @@ import { usePlayerStore } from '../stores/player';
 import LikeButton from './LikeButton.vue';
 import TrackArtists from './TrackArtists.vue';
 import AppIcon from './AppIcon.vue';
+import MarqueeText from './MarqueeText.vue';
+import TrackActionsMenu from './TrackActionsMenu.vue';
 
 const props = defineProps({
     track: {
@@ -45,9 +47,6 @@ const toggleTrack = async () => {
     await player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
 };
 
-const addToQueue = () => {
-    player.addToQueue(props.track);
-};
 </script>
 
 <template>
@@ -62,12 +61,14 @@ const addToQueue = () => {
 
         <div class="track-row__main">
             <h3 class="track-row__title">
-                <Link :href="track.show_url ?? `/tracks/${track.id}`">
-                    {{ track.title }}
-                </Link>
+                <MarqueeText>
+                    <Link :href="track.show_url ?? `/tracks/${track.id}`">
+                        {{ track.title }}
+                    </Link>
+                </MarqueeText>
             </h3>
 
-            <div class="track-row__meta">
+            <MarqueeText class="track-row__meta">
                 <TrackArtists v-if="showArtist" :track="track" />
 
                 <template v-if="showAlbum && track.album">
@@ -76,16 +77,14 @@ const addToQueue = () => {
                         {{ track.album.title }}
                     </Link>
                 </template>
-            </div>
-            <div v-if="track.is_playable === false" class="track-row__meta">Аудио пока недоступно</div>
+            </MarqueeText>
+            <MarqueeText v-if="track.is_playable === false" class="track-row__meta">Аудио пока недоступно</MarqueeText>
         </div>
 
         <div class="track-row__actions">
             <div class="track-row__buttons">
-                <button class="ghost-button ghost-button--small track-row__queue-button" type="button" :disabled="track.is_playable === false" @click.stop="addToQueue">
-                    В очередь
-                </button>
                 <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
+                <TrackActionsMenu :track="track" />
             </div>
 
             <span class="track-row__duration">{{ active ? player.currentTrack?.duration_human ?? track.duration_human : track.duration_human }}</span>
@@ -147,8 +146,7 @@ const addToQueue = () => {
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
 
-.track-row__main,
-.track-row__meta {
+.track-row__main {
     min-width: 0;
 }
 
@@ -165,10 +163,6 @@ const addToQueue = () => {
 }
 
 .track-row__meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
     color: var(--text-soft);
     margin-top: 0.3rem;
 }
@@ -187,8 +181,9 @@ const addToQueue = () => {
 .track-row__buttons {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
 }
 
 .track-row__duration {
@@ -198,8 +193,9 @@ const addToQueue = () => {
 
 @media (max-width: 720px) {
     .track-row {
-        grid-template-columns: 48px minmax(0, 1fr);
-        align-items: start;
+        grid-template-columns: 48px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.55rem;
     }
 
     .track-row__cover {
@@ -208,32 +204,29 @@ const addToQueue = () => {
     }
 
     .track-row--numbered {
-        grid-template-columns: 1.5rem 48px minmax(0, 1fr);
+        grid-template-columns: 1.5rem 48px minmax(0, 1fr) auto;
     }
 
     .track-row__actions {
-        grid-column: 2;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        margin-top: 4px;
-    }
-
-    .track-row--numbered .track-row__actions {
-        grid-column: 3;
+        grid-column: auto;
+        gap: 0.35rem;
+        width: auto;
+        margin-top: 0;
     }
 
     .track-row__buttons {
         min-width: 0;
         flex-wrap: nowrap;
-        gap: 6px;
+        gap: 0.2rem;
     }
 
-    .track-row__queue-button {
-        padding: 8px 10px;
-        font-size: 0.82rem;
+    .track-row__buttons :deep(.icon-button),
+    .track-row__buttons :deep(.track-actions-menu__trigger) {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+        min-height: 38px;
+        padding: 0;
     }
 
     .track-row__duration {
@@ -245,31 +238,21 @@ const addToQueue = () => {
 
 @media (max-width: 420px) {
     .track-row__actions {
-        grid-template-columns: minmax(0, 1fr) 34px;
-        min-width: 0;
-        gap: 4px;
+        gap: 0;
     }
 
     .track-row__buttons {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 36px;
-        gap: 4px;
+        gap: 0.1rem;
     }
 
-    .track-row__buttons :deep(.icon-button) {
+    .track-row__buttons :deep(.icon-button),
+    .track-row__buttons :deep(.track-actions-menu__trigger) {
         width: 36px;
         min-width: 36px;
         height: 36px;
         min-height: 36px;
-        padding: 0;
     }
 
-    .track-row__queue-button {
-        width: 100%;
-        min-width: 0;
-        margin: 0;
-        padding-inline: 5px;
-        font-size: 0.7rem;
-    }
+    .track-row__duration { display: none; }
 }
 </style>
