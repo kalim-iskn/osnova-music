@@ -89,7 +89,6 @@ const creditGroups = computed(() => {
 <template>
     <span v-if="creditGroups.length" class="track-artists">
         <template v-for="(group, groupIndex) in creditGroups" :key="`${group.label}-${groupIndex}`">
-            <span v-if="groupIndex" class="track-artists__role-separator">·</span>
             <span v-if="group.label" class="track-artists__role">{{ group.label }}</span>
             <template v-for="(artist, artistIndex) in group.artists" :key="artist.id ?? `${artist.name}-${artistIndex}`">
                 <span v-if="artistIndex" class="track-artists__separator">{{ group.separator }}</span>
@@ -114,11 +113,6 @@ const creditGroups = computed(() => {
 }
 
 .track-artists__separator {
-    color: #9aa4a5;
-    margin-inline: 0.08rem;
-}
-
-.track-artists__role-separator {
     color: #9aa4a5;
     margin-inline: 0.08rem;
 }

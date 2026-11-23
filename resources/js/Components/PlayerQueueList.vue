@@ -21,6 +21,10 @@ let initialScrollTop = 0;
 let dragScrollElement = null;
 let dragDirection = 0;
 const dropHysteresis = 10;
+let pendingGesture = null;
+let holdTimer = 0;
+let touchDragging = false;
+let suppressClickUntil = 0;
 
 const queue = computed(() => player.queue);
 const draggedTrack = computed(() => dragIndex.value === null ? null : queue.value[dragIndex.value] ?? null);
@@ -144,6 +148,7 @@ const onPointerMove = (event) => {
 };
 
 const onPointerUp = (event) => {
+    if (isPointerDragging.value) suppressClickUntil = performance.now() + 500;
     if (pointerFrame) {
         cancelAnimationFrame(pointerFrame);
         pointerFrame = 0;
@@ -186,6 +191,7 @@ const onPointerCancel = () => {
 };
 
 const detachPointerListeners = () => {
+    clearPendingGesture();
     if (pointerFrame) {
         cancelAnimationFrame(pointerFrame);
         pointerFrame = 0;
@@ -274,11 +280,12 @@ const startPointerDrag = (index, event) => {
     pendingClientY = event.clientY;
     document.body.style.userSelect = 'none';
 
-    event.currentTarget?.setPointerCapture?.(event.pointerId);
-
-    window.addEventListener('pointermove', onPointerMove, { passive: false });
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerCancel);
+    if (event.pointerType !== 'touch') {
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
+        window.addEventListener('pointermove', onPointerMove, { passive: false });
+        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointercancel', onPointerCancel);
+    }
 };
 
 const itemStyle = (index) => {
@@ -333,6 +340,80 @@ const moveByKeyboard = (index, direction) => {
     player.moveQueueItem(index, nextIndex);
 };
 
+// Keep the existing drag engine; only change how a row is picked up.
+const clearPendingGesture = () => {
+    window.clearTimeout(holdTimer);
+    holdTimer = 0;
+    pendingGesture = null;
+    touchDragging = false;
+    window.removeEventListener('pointermove', prepareMouseDrag);
+    window.removeEventListener('pointerup', clearPendingGesture);
+    window.removeEventListener('pointercancel', clearPendingGesture);
+    window.removeEventListener('touchmove', moveTouchDrag);
+    window.removeEventListener('touchend', finishTouchDrag);
+    window.removeEventListener('touchcancel', cancelTouchDrag);
+};
+
+const prepareMouseDrag = (event) => {
+    if (!pendingGesture || Math.hypot(event.clientX - pendingGesture.x, event.clientY - pendingGesture.y) < 5) return;
+    const gesture = pendingGesture;
+    clearPendingGesture();
+    startPointerDrag(gesture.index, {
+        pointerType: 'mouse', button: 0, pointerId: event.pointerId,
+        clientY: gesture.y, currentTarget: gesture.row, preventDefault() {},
+    });
+    onPointerMove(event);
+};
+
+const beginMouseGesture = (index, event) => {
+    if (event.pointerType !== 'mouse' || event.button !== 0 || queue.value.length < 2 || event.target.closest('.queue-item__remove')) return;
+    clearPendingGesture();
+    pendingGesture = { index, x: event.clientX, y: event.clientY, row: event.currentTarget };
+    window.addEventListener('pointermove', prepareMouseDrag, { passive: false });
+    window.addEventListener('pointerup', clearPendingGesture);
+    window.addEventListener('pointercancel', clearPendingGesture);
+};
+
+const beginTouchGesture = (index, event) => {
+    if (event.touches.length !== 1 || queue.value.length < 2 || event.target.closest('.queue-item__remove')) return;
+    clearPendingGesture();
+    const touch = event.touches[0];
+    pendingGesture = { index, x: touch.clientX, y: touch.clientY, row: event.currentTarget };
+    holdTimer = window.setTimeout(() => {
+        const gesture = pendingGesture;
+        if (!gesture) return;
+        pendingGesture = null;
+        touchDragging = true;
+        startPointerDrag(gesture.index, { pointerType: 'touch', clientY: gesture.y, preventDefault() {} });
+    }, 210);
+    window.addEventListener('touchmove', moveTouchDrag, { passive: false });
+    window.addEventListener('touchend', finishTouchDrag, { passive: false });
+    window.addEventListener('touchcancel', cancelTouchDrag);
+};
+
+const moveTouchDrag = (event) => {
+    if (event.touches.length !== 1) { cancelTouchDrag(); return; }
+    const touch = event.touches[0];
+    if (!touchDragging) {
+        if (pendingGesture && Math.hypot(touch.clientX - pendingGesture.x, touch.clientY - pendingGesture.y) > 8) clearPendingGesture();
+        return;
+    }
+    if (event.cancelable) event.preventDefault();
+    onPointerMove({ clientY: touch.clientY, preventDefault() {} });
+};
+
+const finishTouchDrag = (event) => {
+    if (touchDragging) {
+        if (event.cancelable) event.preventDefault();
+        onPointerUp({ clientY: event.changedTouches[0]?.clientY ?? pendingClientY });
+    } else clearPendingGesture();
+};
+const cancelTouchDrag = () => { if (touchDragging) onPointerCancel(); else clearPendingGesture(); };
+const captureRowClick = (event) => {
+    if (performance.now() < suppressClickUntil) { event.preventDefault(); event.stopPropagation(); }
+};
+const captureContextMenu = (event) => { if (touchDragging || pendingGesture) event.preventDefault(); };
+
 onBeforeUnmount(() => {
     detachPointerListeners();
     resetDragState();
@@ -360,21 +441,13 @@ onBeforeUnmount(() => {
                 markerClass(index),
             ]"
             :style="itemStyle(index)"
+            @pointerdown="beginMouseGesture(index, $event)"
+            @touchstart.passive="beginTouchGesture(index, $event)"
+            @click.capture="captureRowClick"
+            @contextmenu="captureContextMenu"
         >
-            <button
-                type="button"
-                class="queue-item__handle"
-                aria-label="Переместить"
-                title="Переместить"
-                @pointerdown="startPointerDrag(index, $event)"
-                @keydown.up.prevent="moveByKeyboard(index, -1)"
-                @keydown.down.prevent="moveByKeyboard(index, 1)"
-            >
-                <AppIcon name="grip" :size="21" :stroke-width="3" />
-            </button>
-
-            <button type="button" class="queue-item__select" @click="player.playQueueItem(index)">
-                <img :src="track.cover_image_url" :alt="track.title" class="queue-item__cover">
+            <button type="button" class="queue-item__select" title="Удерживайте для переноса; Alt + ↑/↓ — перемещение с клавиатуры" @keydown.alt.up.prevent="moveByKeyboard(index, -1)" @keydown.alt.down.prevent="moveByKeyboard(index, 1)" @click="player.playQueueItem(index)">
+                <img :src="track.cover_image_url" :alt="track.title" class="queue-item__cover" draggable="false">
 
                 <span class="queue-item__meta">
                     <strong>{{ track.title }}</strong>
@@ -402,10 +475,6 @@ onBeforeUnmount(() => {
             :class="{ 'queue-item--active': player.currentTrack?.id === draggedTrack.id }"
             :style="previewStyle"
         >
-            <span class="queue-item__handle queue-item__handle--preview">
-                <AppIcon name="grip" :size="21" :stroke-width="3" />
-            </span>
-
             <span class="queue-item__select queue-item__select--preview">
                 <img :src="draggedTrack.cover_image_url" :alt="draggedTrack.title" class="queue-item__cover">
 
@@ -458,7 +527,7 @@ onBeforeUnmount(() => {
 .queue-item {
     position: relative;
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 0.8rem;
     padding: 0.75rem;
@@ -561,7 +630,10 @@ onBeforeUnmount(() => {
     background: transparent;
     border: 0;
     text-align: left;
-    cursor: pointer;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .queue-item__cover {

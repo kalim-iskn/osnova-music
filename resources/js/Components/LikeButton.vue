@@ -6,8 +6,9 @@ import AppIcon from './AppIcon.vue';
 const props = defineProps({
     trackId: {
         type: Number,
-        required: true,
+        default: null,
     },
+    album: { type: Object, default: null },
     iconOnly: {
         type: Boolean,
         default: false,
@@ -20,9 +21,12 @@ const page = usePage();
 const processing = ref(false);
 const user = computed(() => page.props.auth?.user ?? null);
 const likedTrackIds = computed(() => user.value?.liked_track_ids ?? []);
-const liked = computed(() => likedTrackIds.value.includes(props.trackId));
+const liked = computed(() => props.album
+    ? (user.value?.liked_album_ids ?? []).includes(props.album.id)
+    : likedTrackIds.value.includes(props.trackId));
 
 const toggle = async () => {
+    if (processing.value) return;
     if (!user.value) {
         router.get('/login');
         return;
@@ -31,12 +35,16 @@ const toggle = async () => {
     processing.value = true;
 
     try {
+        const url = props.album ? `/albums/${props.album.slug}/like` : `/tracks/${props.trackId}/like`;
         const response = liked.value
-            ? await window.axios.delete(`/tracks/${props.trackId}/like`)
-            : await window.axios.post(`/tracks/${props.trackId}/like`);
+            ? await window.axios.delete(url)
+            : await window.axios.post(url);
 
-        page.props.auth.user.liked_track_ids = response.data.liked_track_ids;
+        const key = props.album ? 'liked_album_ids' : 'liked_track_ids';
+        page.props.auth.user[key] = response.data[key];
         emit('changed', response.data.liked);
+    } catch {
+        window.alert('Не удалось сохранить изменения. Попробуйте ещё раз.');
     } finally {
         processing.value = false;
     }
@@ -46,12 +54,13 @@ const toggle = async () => {
 <template>
     <button
         type="button"
-        class="icon-button"
+        class="icon-button like-button"
         :class="{ 'icon-button--liked': liked }"
         :disabled="processing"
+        :aria-pressed="liked"
         :aria-label="liked ? 'Убрать из любимых' : 'Добавить в любимые'"
         :title="liked ? 'Убрать из любимых' : 'Добавить в любимые'"
-        @click="toggle"
+        @click.stop="toggle"
     >
         <AppIcon :name="liked ? 'heartFilled' : 'heart'" :size="20" :stroke-width="1.7" />
         <span v-if="!iconOnly">{{ liked ? 'В моих треках' : 'Лайк' }}</span>

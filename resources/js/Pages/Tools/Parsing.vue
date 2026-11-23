@@ -142,6 +142,19 @@ onUnmounted(() => window.clearInterval(pollTimer));
         <div v-if="notice" class="parsing-message parsing-message--success">{{ notice }}</div>
         <div v-if="formError" class="parsing-message parsing-message--error">{{ formError }}</div>
 
+        <div v-if="status.genius_proxy" class="panel-card parsing-queue-summary">
+            <h2>Прокси для Genius: {{ status.genius_proxy.enabled ? 'включены' : 'выключены' }}</h2>
+            <p v-if="status.genius_proxy.enabled" class="parsing-muted">
+                Доступно: {{ status.genius_proxy.available }} · Всего проверено: {{ status.genius_proxy.checked }}
+                · Последняя проверка: {{ formatTime(status.genius_proxy.last_checked_at) }}
+            </p>
+            <p v-if="status.genius_proxy.refreshing" class="parsing-muted">Идёт обновление и проверка списка прокси.</p>
+            <p v-if="status.genius_proxy.enabled && !status.genius_proxy.available" class="parsing-warning">
+                Рабочих прокси пока нет: задания с ошибкой Genius будут отправлены на повтор. Число повторов ограничено.
+            </p>
+            <p class="parsing-muted">Переключатель в .env: <code>GENIUS_PROXY_ENABLED=true</code> или <code>false</code>.</p>
+        </div>
+
         <div class="parsing-forms">
             <form class="panel-card parsing-form" @submit.prevent="enqueueArtist">
                 <div>

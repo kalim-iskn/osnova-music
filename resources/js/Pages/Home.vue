@@ -2,7 +2,9 @@
 import { computed } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../Layouts/AppLayout.vue';
+import MusicHero from '../Components/MusicHero.vue';
 import TrackArtists from '../Components/TrackArtists.vue';
+import ReleaseCard from '../Components/ReleaseCard.vue';
 import TrackRow from '../Components/TrackRow.vue';
 import { usePlayerStore } from '../stores/player';
 import AppIcon from '../Components/AppIcon.vue';
@@ -36,26 +38,12 @@ const playLeadTrack = async () => {
 <template>
     <Head title="Главная" />
 
-    <section class="home-intro">
-        <span class="eyebrow">WAVEFLOW · ГЛАВНАЯ</span>
-        <h1>Твоя музыка</h1>
-        <p>Знакомое, любимое и то, что захочется включить дальше.</p>
-    </section>
-
-    <article v-if="leadTrack" class="home-featured-track">
-        <div class="home-featured-track__meta">
-            <span class="eyebrow">Популярное сейчас</span>
-            <h2>{{ leadTrack.title }}</h2>
-            <p><TrackArtists :track="leadTrack" /></p>
-            <div class="home-featured-track__controls">
-                <button class="player-button player-button--primary" type="button" :aria-label="leadTrackIsPlaying ? 'Пауза' : 'Воспроизвести'" @click="playLeadTrack">
-                    <AppIcon :name="leadTrackIsPlaying ? 'pause' : 'play'" :size="20" />
-                </button>
-                <span>{{ leadTrack.duration_human }}</span>
-            </div>
-        </div>
-        <img :src="leadTrack.cover_image_url" :alt="leadTrack.title" class="home-featured-track__cover">
-    </article>
+    <section class="home-intro"><span class="eyebrow">Waveflow / Твоя музыка</span><p>Знакомое, любимое и то, что захочется включить дальше.</p></section>
+    <MusicHero v-if="leadTrack" :title="leadTrack.title" label="Популярное сейчас" :cover="leadTrack.cover_image_url" :playing="leadTrackIsPlaying" @play="playLeadTrack">
+        <template #meta><TrackArtists :track="leadTrack" /></template><template #tags><span>{{ leadTrack.duration_human }}</span><span v-if="leadTrack.release_year">· {{ leadTrack.release_year }}</span></template>
+        <template #actions><button class="primary-button" type="button" @click="playLeadTrack"><AppIcon :name="leadTrackIsPlaying ? 'pause' : 'play'" :size="18" />{{ leadTrackIsPlaying ? 'Пауза' : 'Слушать трек' }}</button></template>
+    </MusicHero>
+    <div class="music-divider"><span>Сейчас в каталоге</span><Link href="/search">Вся музыка ↗</Link></div>
 
     <section class="section-block home-section">
         <div class="section-heading">
@@ -79,13 +67,7 @@ const playLeadTrack = async () => {
         </div>
 
         <div class="album-grid album-grid--home">
-            <Link v-for="album in freshAlbums" :key="album.id" :href="`/albums/${album.slug}`" class="album-card">
-                <img :src="album.cover_image_url" :alt="album.title" class="album-card__cover">
-                <div class="album-card__body">
-                    <strong>{{ album.title }}</strong>
-                    <small>{{ album.artist.name }}</small>
-                </div>
-            </Link>
+            <ReleaseCard v-for="album in freshAlbums" :key="album.id" :album="album" />
         </div>
     </section>
 

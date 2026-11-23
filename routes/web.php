@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AlbumController;
 use App\Http\Controllers\AlbumGeniusController;
+use App\Http\Controllers\AlbumLikeController;
 use App\Http\Controllers\ArtistController;
 use App\Http\Controllers\ArtistGeniusController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
@@ -43,6 +44,9 @@ Route::middleware('guest')->group(function (): void {
 Route::middleware('auth')->group(function (): void {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/library/tracks', [LibraryController::class, 'index'])->name('library.tracks');
+    Route::get('/library/tracks/queue', [LibraryController::class, 'queue'])->name('library.queue');
+    Route::post('/albums/{album:slug}/like', [AlbumLikeController::class, 'store'])->name('albums.like');
+    Route::delete('/albums/{album:slug}/like', [AlbumLikeController::class, 'destroy'])->name('albums.unlike');
     Route::post('/tracks/{track}/like', [TrackLikeController::class, 'store'])->name('tracks.like');
     Route::delete('/tracks/{track}/like', [TrackLikeController::class, 'destroy'])->name('tracks.unlike');
 });

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { formatSeconds } from '../utils/time';
+import { getOfflineTracks, offlineMediaUrl, OFFLINE_OWNER_KEY } from '../utils/offlineTracks';
 
 const STORAGE_KEY = 'waveflow-player';
 const PLAY_REPORT_THRESHOLD = 8;
@@ -40,6 +41,9 @@ export const usePlayerStore = defineStore('player', {
         initialized: false,
         listeners: null,
         playReportedForCurrent: false,
+        offlineTrackIds: [],
+        offlineArtworkIds: [],
+        offlineOwnerId: null,
     }),
 
     getters: {
@@ -57,6 +61,8 @@ export const usePlayerStore = defineStore('player', {
 
             this.restore();
             this.initialized = true;
+            window.addEventListener('waveflow-offline-changed', () => this.refreshOfflineTracks());
+            void this.refreshOfflineTracks();
         },
 
         attach(audioElement) {
@@ -122,8 +128,40 @@ export const usePlayerStore = defineStore('player', {
             });
 
             if (this.currentTrack) {
-                this.audioElement.src = this.currentTrack.playback_url ?? this.currentTrack.audio_url;
+                this.audioElement.src = this.trackSource(this.currentTrack);
                 this.audioElement.currentTime = this.currentTime;
+            }
+        },
+
+        trackSource(track) {
+            const available = this.offlineOwnerId && this.offlineTrackIds.includes(track.id);
+            if (available && navigator.serviceWorker?.controller) {
+                return offlineMediaUrl(this.offlineOwnerId, track.id);
+            }
+            return track.playback_url ?? track.audio_url;
+        },
+
+        async refreshOfflineTracks() {
+            const ownerId = localStorage.getItem(OFFLINE_OWNER_KEY);
+            this.offlineOwnerId = ownerId;
+            try {
+                const records = await getOfflineTracks(ownerId);
+                if (ownerId !== localStorage.getItem(OFFLINE_OWNER_KEY)) return;
+                this.offlineTrackIds = records.map((item) => item.id);
+                this.offlineArtworkIds = records.filter((item) => item.artwork).map((item) => item.id);
+
+                // A restored queue must also be able to play the downloaded file.
+                if (this.audioElement && this.currentTrack && this.audioElement.paused) {
+                    const source = this.trackSource(this.currentTrack);
+                    if (this.audioElement.getAttribute('src') !== source) {
+                        const position = this.currentTime;
+                        this.audioElement.src = source;
+                        this.currentTime = position;
+                    }
+                }
+            } catch {
+                this.offlineTrackIds = [];
+                this.offlineArtworkIds = [];
             }
         },
 
@@ -293,7 +331,7 @@ export const usePlayerStore = defineStore('player', {
                 return;
             }
 
-            this.audioElement.src = track.playback_url ?? track.audio_url;
+            this.audioElement.src = this.trackSource(track);
             this.audioElement.currentTime = 0;
             this.currentTime = 0;
             this.duration = track.duration_seconds || 0;
@@ -314,7 +352,7 @@ export const usePlayerStore = defineStore('player', {
         async fallbackToDirectSource() {
             const track = this.currentTrack;
 
-            if (!track || !this.audioElement || !track.audio_url) {
+            if (!track || !this.audioElement || !track.audio_url || navigator.onLine === false) {
                 return;
             }
 
@@ -325,7 +363,8 @@ export const usePlayerStore = defineStore('player', {
                 return;
             }
 
-            this.audioElement.src = track.audio_url;
+            this.audioElement.src = currentSource.includes('/__waveflow_offline__/')
+                ? (track.playback_url ?? track.audio_url) : track.audio_url;
             this.audioElement.currentTime = 0;
             this.currentTime = 0;
             this.playReportedForCurrent = false;

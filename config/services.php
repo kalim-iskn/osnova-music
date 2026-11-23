@@ -2,6 +2,10 @@
 
 return [
     'genius' => [
+        'proxy_enabled' => env('GENIUS_PROXY_ENABLED', true),
+        'proxy_check_limit' => (int) env('GENIUS_PROXY_CHECK_LIMIT', 200),
+        'proxy_check_concurrency' => (int) env('GENIUS_PROXY_CHECK_CONCURRENCY', 8),
+        'proxy_source_url' => env('GENIUS_PROXY_SOURCE_URL', 'http://proxy-source-fetch:8765'),
         'base_url' => env('GENIUS_API_BASE_URL', 'https://genius.com/api'),
         'access_token' => env('GENIUS_ACCESS_TOKEN'),
         'cookie' => env('GENIUS_COOKIE'),

@@ -18,7 +18,8 @@ class ArtistController extends Controller
     public function show(Artist $artist): Response
     {
         $creditedTracksQuery = Track::query()
-            ->whereHas('artists', fn ($query) => $query->whereKey($artist->id));
+            ->where(fn ($query) => $query->where('artist_id', $artist->id)
+                ->orWhereHas('artists', fn ($credits) => $credits->whereKey($artist->id)));
 
         $artist->setAttribute('tracks_count', (clone $creditedTracksQuery)->count());
         $artist->setAttribute('plays_count', (int) (clone $creditedTracksQuery)->sum('plays_count'));
@@ -61,6 +62,7 @@ class ArtistController extends Controller
             ->sort(function (Album $left, Album $right): int {
                 $key = static function (Album $album): int {
                     $parts = $album->release_date_components ?? [];
+
                     return (int) ($parts['year'] ?? 0) * 10000
                         + (int) ($parts['month'] ?? 0) * 100
                         + (int) ($parts['day'] ?? 0);

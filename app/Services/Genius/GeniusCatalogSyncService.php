@@ -1743,7 +1743,7 @@ class GeniusCatalogSyncService
                         $bandId = (int) $band['id'];
                         $bandSongs = $this->geniusClient->allArtistSongs($bandId);
                         $songSummaries = $this->mergeSongSummaries($songSummaries, $bandSongs);
-                        $this->currentPageArtistReferenceNames[] = (string) $band['name'];
+                        $this->currentPageArtistReferenceNames[] = GeniusNameMatcher::storageValue((string) $band['name']);
                         $this->matchingLog('info', 'Related artist catalog loaded.', ['artist' => $page->artistName, 'related_artist' => (string) $band['name'], 'related_artist_id' => $bandId, 'song_count' => count($bandSongs)]);
                     } else {
                         $this->matchingLog('warning', 'Related artist catalog skipped: anchor artist was not confirmed.', ['artist' => $page->artistName, 'related_artist' => 'КИНО']);
@@ -1865,7 +1865,8 @@ class GeniusCatalogSyncService
                             'source_key' => $pageTrackKeys[spl_object_hash($parsedTrack)],
                             'track_title' => GeniusNameMatcher::storageValue($parsedTrack->title),
                             'matched' => false,
-                            'completed' => ! $trackDeferred,
+                            'completed' => ! $trackDeferred && ! $this->geniusUnavailable
+                                && ! isset($this->fallbackNetworkFailuresByTrack[$this->fallbackSearchResolutionKey($parsedTrack)]),
                         ] : null,
                     ]);
 
@@ -1880,6 +1881,7 @@ class GeniusCatalogSyncService
                 }
 
                 $this->geniusUnavailable = $this->geniusUnavailable || $this->isGeniusRequestFailure($exception);
+                $trackDeferred = $trackDeferred || $this->isGeniusRequestFailure($exception);
                 $unmatchedTracks++;
 
                 try {
@@ -1934,6 +1936,9 @@ class GeniusCatalogSyncService
             ));
 
             foreach ($deferredAlbumPageTracks as $parsedTrack) {
+                if ($this->geniusUnavailable || isset($this->fallbackNetworkFailuresByTrack[$this->fallbackSearchResolutionKey($parsedTrack)])) {
+                    continue;
+                }
                 if (! $this->resolveAlbumPageContextAlbum($artist, $parsedTrack) instanceof Album) {
                     $this->reportProgress([
                         'tracks_total' => count($page->tracks),
@@ -1995,7 +2000,8 @@ class GeniusCatalogSyncService
                                 'source_key' => $pageTrackKeys[spl_object_hash($parsedTrack)],
                                 'track_title' => GeniusNameMatcher::storageValue($parsedTrack->title),
                                 'matched' => (bool) ($deferredAlbumPageTrackMatchedState[spl_object_hash($parsedTrack)] ?? false),
-                                'completed' => true,
+                                'completed' => ! $this->geniusUnavailable
+                                    && ! isset($this->fallbackNetworkFailuresByTrack[$this->fallbackSearchResolutionKey($parsedTrack)]),
                             ],
                         ]);
 
@@ -2489,7 +2495,7 @@ class GeniusCatalogSyncService
                     'source_key' => $checkpointKey,
                     'track_title' => GeniusNameMatcher::storageValue($parsedTrack->title),
                     'matched' => false,
-                    'completed' => true,
+                    'completed' => ! $this->geniusUnavailable,
                 ],
             ]);
         }
@@ -3070,7 +3076,7 @@ class GeniusCatalogSyncService
 
     private function isGeniusRequestFailure(Throwable $exception): bool
     {
-        return preg_match('/Genius API вернул \d+|cURL error|Connection timed out|SSL connect error|Could not resolve host/i', $exception->getMessage()) === 1;
+        return preg_match('/Genius API вернул \d+|Genius API returned invalid JSON|Genius proxy unavailable|cURL error|Connection timed out|SSL connect error|Could not resolve host/i', $exception->getMessage()) === 1;
     }
 
     private function primeAlbumPageAlbumContext(Artist $artist, ParsedArtistPage $page): void

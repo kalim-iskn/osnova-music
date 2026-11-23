@@ -18,6 +18,55 @@ class GeniusCatalogSyncServiceTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_genius_outage_keeps_fallback_audio_pending_for_a_later_match(): void
+    {
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function searchArtist(string $query): array
+            {
+                throw new \RuntimeException('Genius proxy unavailable: no checked proxy is currently available.');
+            }
+        };
+        $service = new GeniusCatalogSyncService($client);
+        $checkpoints = [];
+        $service->setProgressCallback(function (array $progress) use (&$checkpoints): void {
+            if (isset($progress['_track_checkpoint'])) {
+                $checkpoints[] = $progress['_track_checkpoint'];
+            }
+        });
+        $page = new ParsedArtistPage('Test Artist', 'test-artist', null, [
+            new ParsedTrack('Test Song', 180, 'https://audio.test/outage.mp3', null, artistNames: ['Test Artist']),
+        ]);
+        $result = $service->syncArtistPage($page);
+        $this->assertTrue($result['genius_unavailable']);
+        $this->assertSame(1, Track::query()->count());
+        $this->assertFalse($checkpoints[0]['matched']);
+        $this->assertFalse($checkpoints[0]['completed']);
+    }
+
+    public function test_song_search_outage_keeps_that_track_pending(): void
+    {
+        $artist = Artist::query()->create(['name' => 'Test Artist', 'slug' => 'test-artist', 'genius_id' => 1234]);
+        $client = new class extends GeniusClient {
+            public function __construct() {}
+            public function allArtistAlbums(int $artistId): array { return []; }
+            public function allArtistSongs(int $artistId): array { return []; }
+            public function searchSongs(string $query): array { throw new \RuntimeException('Genius proxy unavailable'); }
+        };
+        $checkpoints = [];
+        $service = new GeniusCatalogSyncService($client);
+        $service->setProgressCallback(function (array $progress) use (&$checkpoints): void {
+            if (isset($progress['_track_checkpoint'])) $checkpoints[] = $progress['_track_checkpoint'];
+        });
+        $page = new ParsedArtistPage($artist->name, $artist->slug, null, [
+            new ParsedTrack('Unknown Song', 180, 'https://audio.test/unknown.mp3', null, artistNames: [$artist->name]),
+        ]);
+        $service->syncArtistPage($page);
+        $this->assertNotEmpty($checkpoints);
+        $this->assertFalse(end($checkpoints)['completed']);
+        $this->assertFalse(end($checkpoints)['matched']);
+    }
+
     public function test_distinct_complete_source_pages_with_same_title_keep_separate_albums(): void
     {
         $artist = Artist::query()->create(['name' => 'Artist', 'slug' => 'artist']);
@@ -1013,11 +1062,11 @@ class GeniusCatalogSyncServiceTest extends TestCase
         $client = new class extends GeniusClient {
             public function __construct() {}
             public function searchArtist(string $query): array { return [['id' => 1116311, 'name' => 'Виктор Цой']]; }
-            public function artist(int $id): ?array { return ['id' => $id, 'name' => $id === 92 ? 'КИНО' : 'Виктор Цой']; }
+            public function artist(int $id): ?array { return ['id' => $id, 'name' => $id === 92 ? 'КИНО (KINO)' : 'Виктор Цой']; }
             public function allArtistAlbums(int $id): array { return []; }
             public function allArtistSongs(int $id): array { return $id === 92 ? [$this->song(5)] : []; }
             public function searchSongs(string $query): array { return []; }
-            public function song(int $id): ?array { return $id === 7599279 ? ['id' => $id, 'primary_artist' => ['id' => 92, 'name' => 'КИНО']] : ['id' => 5, 'title' => 'Хочу перемен', 'primary_artist' => ['id' => 92, 'name' => 'КИНО'], 'featured_artists' => []]; }
+            public function song(int $id): ?array { return $id === 7599279 ? ['id' => $id, 'primary_artist' => ['id' => 92, 'name' => 'КИНО (KINO)']] : ['id' => 5, 'title' => 'Хочу перемен', 'primary_artist' => ['id' => 92, 'name' => 'КИНО (KINO)'], 'featured_artists' => []]; }
         };
         $source = new ParsedTrack('Хочу перемен', 250, 'https://audio.test/track.mp3', null, artistNames: ['Виктор Цой'], audioFileId: '1');
         \Illuminate\Support\Facades\Http::preventStrayRequests();

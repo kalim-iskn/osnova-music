@@ -9,6 +9,7 @@ use App\Models\ParsingTask;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Inertia\Inertia;
@@ -61,6 +62,17 @@ class ParsingStatusController extends Controller
         $trackedRunning = ParsingTask::query()->where('status', 'running')->count();
 
         return response()->json([
+            'genius_proxy' => [
+                'enabled' => (bool) config('services.genius.proxy_enabled', true),
+                'available' => DB::table('genius_proxies')->where('working', true)
+                    ->whereNull('last_error')
+                    ->where('checked_at', '>=', now()->subHours(2))
+                    ->where(fn ($q) => $q->whereNull('failed_until')->orWhere('failed_until', '<=', now()))->count(),
+                'checked' => DB::table('genius_proxies')->count(),
+                'last_checked_at' => DB::table('genius_proxies')->max('checked_at'),
+                'refreshing' => Cache::has('genius-proxy-refresh-status'),
+                'last_refresh' => Cache::get('genius-proxy-last-refresh'),
+            ],
             'queue' => [
                 'name' => $queueName,
                 'pending' => $pendingJobs,

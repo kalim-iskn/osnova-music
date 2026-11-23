@@ -87,7 +87,11 @@ const handleDocumentKeydown = (event) => {
     }
 };
 
-const handleViewportChange = () => closeMenu();
+const handleViewportChange = (event) => {
+    // Captured scroll events include the picker itself; keep it open while choosing.
+    if (event.type === 'scroll' && event.target !== window && event.target !== document && panel.value?.contains(event.target)) return;
+    closeMenu();
+};
 
 const openMenu = async () => {
     isOpen.value = true;
@@ -143,7 +147,7 @@ onBeforeUnmount(() => closeMenu());
         title="Действия с треком"
         @click.stop="toggleMenu"
     >
-        <AppIcon name="moreHorizontal" :size="20" />
+        <AppIcon name="moreVertical" :size="20" />
     </button>
 
     <Teleport to="body">
@@ -166,7 +170,6 @@ onBeforeUnmount(() => closeMenu());
                     <span>В конец очереди</span>
                 </button>
 
-                <div class="track-actions-menu__divider"></div>
                 <button
                     class="track-actions-menu__item"
                     type="button"
@@ -272,12 +275,6 @@ onBeforeUnmount(() => closeMenu());
 .track-actions-menu__item:disabled {
     opacity: 0.48;
     cursor: not-allowed;
-}
-
-.track-actions-menu__divider {
-    height: 1px;
-    margin: 4px 8px;
-    background: var(--border, #e0e5e3);
 }
 
 .track-actions-menu__queue-picker {

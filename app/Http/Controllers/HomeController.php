@@ -22,7 +22,7 @@ class HomeController extends Controller
             ->get();
 
         $spotlightArtists = Artist::query()
-            ->withCount('tracks')
+            ->withCatalogTrackCount()
             ->latest('id')
             ->limit(6)
             ->get();

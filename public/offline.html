@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#12171c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <title>Скачанные треки · WaveFlow</title>
+    <style>
+        :root { color-scheme: dark; font: 16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background: #12171c; color: #eaf1ef; }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 28px 16px 112px; background: radial-gradient(ellipse 75% 28% at 15% 0%,#263b39 0%,#12171c 100%); min-height: 100vh; }
+        main { max-width: 760px; margin: auto; }
+        header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
+        .brand { text-decoration: none; color: #dbf8ee; font-size: 22px; font-weight: 750; letter-spacing: -.04em; }
+        h1 { font-size: clamp(24px,6vw,34px); letter-spacing: -.035em; margin: 8px 0 4px; }
+        p { margin: 0 0 18px; color: #a3b8b5; }
+        a { color: #86efc5; }
+        .badge { color: #86efc5; border: 1px solid #406157; background: #20332e; padding: 6px 12px; border-radius: 999px; font-size: 13px; }
+        .notice { padding: 17px; background: #202b30; border-radius: 14px; margin: 16px 0; color: #c8d9d5; }
+        .list { display: grid; gap: 8px; }
+        .track { color: inherit; background: #20292d; border: 1px solid #2c3a3e; border-radius: 14px; display: flex; align-items: center; gap: 12px; padding: 10px; width: 100%; min-width: 0; text-align: left; cursor: pointer; }
+        .track.active { border-color: #4eab89; background: #253a37; }
+        .track img { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
+        .track-info { min-width: 0; display: grid; }
+        .track-info strong, .track-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .track-info small { color: #a1b5b2; margin-top: 3px; }
+        .player { position: fixed; bottom: 0; left: 0; right: 0; background: #1e292b; border-top: 1px solid #38504d; padding: 12px 16px; padding-bottom: max(12px, env(safe-area-inset-bottom)); box-shadow: 0 -12px 40px #0004; }
+        .player-inner { max-width: 760px; margin: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .player-info { flex: 1; min-width: 140px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .player-info small { display: block; color: #abc2ba; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+        .player-controls { display: flex; gap: 8px; }
+        .player-controls button { background: #304d44; border: 0; color: white; cursor: pointer; border-radius: 10px; min-height: 40px; min-width: 40px; padding: 6px 12px; font-size: 18px; }
+        audio { display: block; width: 100%; margin-top: 10px; height: 32px; }
+        @media(max-width:500px) { .player-inner { gap: 6px; } .player-controls { gap: 5px; } .track { gap: 9px; } }
+    </style>
+</head>
+<body>
+<main>
+    <header><a class="brand" href="/">♫ WaveFlow</a><span class="badge">Офлайн-режим</span></header>
+    <h1>Скачанные треки</h1>
+    <p>Песни, которые вы сохранили на этом устройстве. Интернет для прослушивания не нужен.</p>
+    <div id="status" class="notice">Загружаем локальную коллекцию…</div>
+    <div id="tracks" class="list"></div>
+</main>
+<div class="player">
+    <div class="player-inner">
+        <div class="player-info"><strong id="now-title">Выберите песню</strong><small id="now-artist">WaveFlow</small></div>
+        <div class="player-controls">
+            <button id="prev" type="button" aria-label="Предыдущий трек">⏮</button>
+            <button id="toggle" type="button" aria-label="Воспроизвести или приостановить">▶</button>
+            <button id="next" type="button" aria-label="Следующий трек">⏭</button>
+        </div>
+    </div>
+    <div style="max-width:760px;margin:auto"><audio id="audio" controls preload="metadata"></audio></div>
+</div>
+<script>
+(() => {
+    'use strict';
+    const audio = document.getElementById('audio');
+    const status = document.getElementById('status');
+    const list = document.getElementById('tracks');
+    const title = document.getElementById('now-title');
+    const artist = document.getElementById('now-artist');
+    const owner = localStorage.getItem('waveflow-offline-owner');
+    let records = [];
+    let current = -1;
+    const mediaUrl = (id, kind = 'audio') => `/__waveflow_offline__/${encodeURIComponent(owner)}/${encodeURIComponent(id)}/${kind}`;
+    const requestResult = (request) => new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    const openDb = () => new Promise((resolve, reject) => {
+        const request = indexedDB.open('waveflow-offline-v1', 1);
+        request.onupgradeneeded = () => {
+            const store = request.result.createObjectStore('tracks', { keyPath: 'key' });
+            store.createIndex('ownerId', 'ownerId');
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    const getTracks = async () => {
+        const db = await openDb();
+        try {
+            return await requestResult(db.transaction('tracks', 'readonly').objectStore('tracks').index('ownerId').getAll(String(owner)));
+        } finally { db.close(); }
+    };
+    const updateMediaSession = () => {
+        const track = records[current];
+        if (!track || !('mediaSession' in navigator) || !('MediaMetadata' in window)) return;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: track.title || 'Без названия', artist: track.artist || '', album: track.album || '',
+            artwork: [{ src: new URL(track.artwork ? mediaUrl(track.id, 'artwork') : '/icon-512.png', location.href).href }],
+        });
+        navigator.mediaSession.playbackState = audio.paused ? 'paused' : 'playing';
+    };
+    const updatePosition = () => {
+        if (!navigator.mediaSession?.setPositionState) return;
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        if (duration <= 0) return;
+        try { navigator.mediaSession.setPositionState({ duration, position: Math.min(duration, audio.currentTime || 0), playbackRate: 1 }); } catch { /* Safari. */ }
+    };
+    const render = () => {
+        list.replaceChildren();
+        records.forEach((track, index) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'track' + (index === current ? ' active' : '');
+            const cover = document.createElement('img');
+            cover.alt = '';
+            cover.src = track.artwork ? mediaUrl(track.id, 'artwork') : '/track-placeholder.svg';
+            cover.onerror = () => { cover.onerror = null; cover.src = '/track-placeholder.svg'; };
+            const info = document.createElement('span');
+            info.className = 'track-info';
+            const name = document.createElement('strong');
+            name.textContent = track.title;
+            const subtitle = document.createElement('small');
+            subtitle.textContent = track.artist || '';
+            info.append(name, subtitle);
+            button.append(cover, info);
+            button.addEventListener('click', () => play(index));
+            list.append(button);
+        });
+    };
+    const play = (index) => {
+        if (index < 0 || index >= records.length) return;
+        current = index;
+        const track = records[current];
+        audio.src = mediaUrl(track.id);
+        title.textContent = track.title;
+        artist.textContent = track.artist;
+        render();
+        updateMediaSession();
+        void audio.play().catch(() => { status.hidden = false; status.textContent = 'Не удалось начать воспроизведение. Попробуйте нажать Play.'; });
+    };
+    document.getElementById('prev').addEventListener('click', () => {
+        if (audio.currentTime > 5) { audio.currentTime = 0; return; }
+        play(current > 0 ? current - 1 : 0);
+    });
+    document.getElementById('next').addEventListener('click', () => play(current + 1 < records.length ? current + 1 : 0));
+    document.getElementById('toggle').addEventListener('click', () => {
+        if (current < 0) { play(0); return; }
+        if (audio.paused) void audio.play().catch(() => {});
+        else audio.pause();
+    });
+    audio.addEventListener('ended', () => { if (current + 1 < records.length) play(current + 1); });
+    audio.addEventListener('play', () => { document.getElementById('toggle').textContent = '⏸'; updateMediaSession(); });
+    audio.addEventListener('pause', () => { document.getElementById('toggle').textContent = '▶'; updateMediaSession(); });
+    audio.addEventListener('timeupdate', updatePosition);
+    audio.addEventListener('loadedmetadata', updatePosition);
+    audio.addEventListener('error', () => { status.hidden = false; status.textContent = 'Не удалось открыть скачанный файл. Попробуйте обновить страницу.'; });
+    if (navigator.mediaSession) {
+        for (const [action, handler] of Object.entries({
+            play: () => { if (audio.paused) void audio.play().catch(() => {}); },
+            pause: () => audio.pause(),
+            nexttrack: () => play(current + 1 < records.length ? current + 1 : 0),
+            previoustrack: () => { if (audio.currentTime > 5) audio.currentTime = 0; else play(Math.max(0, current - 1)); },
+            seekto: ({ seekTime }) => { if (Number.isFinite(seekTime)) audio.currentTime = seekTime; },
+        })) {
+            try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* Not supported. */ }
+        }
+        for (const action of ['seekbackward', 'seekforward']) {
+            try { navigator.mediaSession.setActionHandler(action, null); } catch { /* Not supported. */ }
+        }
+    }
+    const init = async () => {
+        if (!owner) { status.textContent = 'Сначала войдите в WaveFlow с интернетом и скачайте треки в разделе «Мои треки».'; return; }
+        if (!('serviceWorker' in navigator) || !('indexedDB' in window)) { status.textContent = 'Браузер не поддерживает офлайн-воспроизведение.'; return; }
+        try {
+            await navigator.serviceWorker.ready;
+            records = (await getTracks()).sort((a, b) => b.savedAt - a.savedAt);
+            if (!records.length) { status.textContent = 'На этом устройстве пока нет скачанных песен. Откройте «Мои треки» с интернетом.'; return; }
+            status.hidden = true;
+            render();
+        } catch { status.textContent = 'Не удалось прочитать скачанные треки из памяти браузера.'; }
+    };
+    void init();
+})();
+</script>
+</body>
+</html>

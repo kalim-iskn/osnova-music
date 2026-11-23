@@ -1,8 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
+import MusicHero from "../../Components/MusicHero.vue";
+import MusicDescription from "../../Components/MusicDescription.vue";
+import AppIcon from "../../Components/AppIcon.vue";
+import LikeButton from "../../Components/LikeButton.vue";
+import TrackActionsMenu from "../../Components/TrackActionsMenu.vue";
 import AppLayout from '../../Layouts/AppLayout.vue';
-import SocialIconLink from '../../Components/SocialIconLink.vue';
+import ArtistSocialLinks from '../../Components/ArtistSocialLinks.vue';
+import GeniusSource from '../../Components/GeniusSource.vue';
 import TrackArtists from '../../Components/TrackArtists.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { usePlayerStore } from '../../stores/player';
@@ -106,56 +112,20 @@ onMounted(fetchRuntime);
 </script>
 
 <template>
-    <Head :title="track.title" />
-
-    <section class="hero-card hero-card--track track-page__hero-card">
-        <img :src="track.cover_image_url" :alt="track.title" class="hero-card__album-cover track-page__hero-cover" role="button" tabindex="0" @click="toggleTrackPlayback" @keydown.enter.prevent="toggleTrackPlayback" @keydown.space.prevent="toggleTrackPlayback">
-
-        <div class="track-page__hero-body">
-            <span class="eyebrow">Трек</span>
-            <h1>{{ track.title }}</h1>
-
-            <p class="hero-card__description track-page__description-row">
-                <TrackArtists :artists="currentArtists" />
-                <template v-if="currentAlbum">
-                    <span class="hero-card__separator">•</span>
-                    <Link v-if="currentAlbum.slug" :href="`/albums/${currentAlbum.slug}`">{{ currentAlbum.title }}</Link>
-                    <span v-else>{{ currentAlbum.title }}</span>
-                </template>
-                <template v-if="track.release_year">
-                    <span class="hero-card__separator">•</span>
-                    <span>{{ track.release_year }}</span>
-                </template>
-            </p>
-
-            <div class="track-page__chips">
-                <span class="badge">{{ track.duration_human }}</span>
-                <span v-if="languageLabel" class="badge">{{ languageLabel }}</span>
-                <span v-for="genre in displayGenres" :key="genre" class="badge">{{ genre }}</span>
-            </div>
-
-            <button
-                type="button"
-                class="track-page__play-button"
-                :disabled="track.is_playable === false"
-                @click="toggleTrackPlayback"
-            >
-                {{ track.is_playable === false ? 'Аудио пока недоступно' : (isTrackPlaying ? 'Стоп' : 'Слушать трек') }}
-            </button>
-
-            <div v-if="runtimeLoading" class="track-page__status">Загружаю расширенные данные Genius…</div>
-        </div>
-    </section>
-
-    <section class="section-grid track-page__content-grid">
+<Head :title="track.title" />
+<MusicHero :title="track.title" label="Трек" :cover="track.cover_image_url" :playing="isTrackPlaying" :disabled="track.is_playable === false" @play="toggleTrackPlayback">
+        <template #meta><TrackArtists :artists="currentArtists" /><template v-if="currentAlbum"><span>·</span><Link v-if="currentAlbum.slug" :href="`/albums/${currentAlbum.slug}`">{{ currentAlbum.title }}</Link><span v-else>{{ currentAlbum.title }}</span></template><template v-if="track.release_year"><span>·</span><span>{{ track.release_year }}</span></template></template>
+        <template #tags><span class="badge">{{ track.duration_human }}</span><span v-if="languageLabel" class="badge">{{ languageLabel }}</span><span v-for="genre in displayGenres" :key="genre" class="badge">{{ genre }}</span></template>
+        <template #actions><button class="primary-button" type="button" :disabled="track.is_playable === false" @click="toggleTrackPlayback"><AppIcon :name="isTrackPlaying ? 'pause' : 'play'" :size="18" />{{ track.is_playable === false ? 'Аудио пока недоступно' : isTrackPlaying ? 'Пауза' : 'Слушать трек' }}</button><LikeButton :track-id="track.id" icon-only /><TrackActionsMenu :track="track" /></template>
+    </MusicHero>
+<div class="music-divider"><span>О записи</span><span>Участники и история трека</span></div>
+    <section class="music-info-grid track-page__content-grid">
         <div class="panel-card">
             <div class="section-heading section-heading--tight">
-                <h2>О треке</h2>
+                <h2>О треке</h2><span v-if="runtimeLoading" class="track-page__status" role="status">Загружаются данные Genius…</span>
             </div>
 
-            <p v-if="trackDescription" class="track-page__description">
-                {{ trackDescription }}
-            </p>
+            <MusicDescription v-if="trackDescription" :text="trackDescription" />
             <p v-else-if="track.audio_version_ambiguous" class="track-page__description track-page__description--muted">
                 Точная версия этой записи не подтверждена. Аудиофайл сохранён отдельно от оригинального трека.
             </p>
@@ -164,15 +134,7 @@ onMounted(fetchRuntime);
             </p>
 
             <div class="track-page__links">
-                <a
-                    v-if="runtime?.song?.url || track.genius_url"
-                    :href="runtime?.song?.url ?? track.genius_url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="ghost-button"
-                >
-                    Genius
-                </a>
+                <GeniusSource :href="runtime?.song?.url ?? track.genius_url" />
             </div>
         </div>
 
@@ -210,12 +172,7 @@ onMounted(fetchRuntime);
                         </h3>
 
                         <div v-if="artist.social_links && Object.keys(artist.social_links).length" class="track-page__artist-socials">
-                            <SocialIconLink
-                                v-for="(value, key) in artist.social_links"
-                                :key="key"
-                                :network="key"
-                                :value="value"
-                            />
+                            <ArtistSocialLinks :links="artist.social_links" />
                         </div>
                     </div>
                 </article>

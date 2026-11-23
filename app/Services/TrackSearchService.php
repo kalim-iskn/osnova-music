@@ -31,7 +31,7 @@ class TrackSearchService
         $term = trim((string) $term);
 
         return Artist::query()
-            ->withCount('tracks')
+            ->withCatalogTrackCount()
             ->when($term !== '', function ($query) use ($term) {
                 $query->where(fn ($subQuery) => $subQuery
                     ->where('name', 'ILIKE', "%{$term}%")

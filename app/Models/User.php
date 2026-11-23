@@ -43,4 +43,11 @@ class User extends Authenticatable
             ->withTimestamps()
             ->orderByPivot('created_at', 'desc');
     }
+
+    public function likedAlbums(): BelongsToMany
+    {
+        return $this->belongsToMany(Album::class, 'album_user_likes')
+            ->withTimestamps()
+            ->orderByPivot('created_at', 'desc');
+    }
 }

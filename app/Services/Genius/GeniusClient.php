@@ -95,9 +95,11 @@ class GeniusClient
         $this->songsPerPage = max(10, (int) config('services.genius.songs_per_page', 50));
         $this->albumsPerPage = max(10, (int) config('services.genius.albums_per_page', 50));
         $this->maxPages = max(1, (int) config('services.genius.max_pages', 100));
-        $this->accessToken = config('services.genius.access_token');
+        // Public proxies must never receive a configured private token or cookie.
+        $usingProxy = app(GeniusProxyProvider::class)->enabled();
+        $this->accessToken = $usingProxy ? null : config('services.genius.access_token');
         $this->cacheVersion = (string) config('services.genius.cache_version', '20260330-4');
-        $this->cookieJar = $this->createCookieJar(trim((string) config('services.genius.cookie', '')));
+        $this->cookieJar = $usingProxy ? new CookieJar() : $this->createCookieJar(trim((string) config('services.genius.cookie', '')));
         $this->retryTimes = max(1, (int) config('services.genius.retry_times', 4));
         $this->retrySleepMs = max(250, (int) config('services.genius.retry_sleep_ms', 1500));
         $this->detailConcurrency = max(1, min(16, (int) config('services.genius.detail_concurrency', 12)));
@@ -399,6 +401,7 @@ class GeniusClient
                             )
                             ->withHeaders($this->geniusHeaders())
                             ->withOptions(['cookies' => $this->cookieJar])
+                            ->withMiddleware(app(GeniusProxyProvider::class)->middleware())
                             ->withRequestMiddleware(function ($request) use (&$attemptCounts, $songId) {
                                 $attemptCounts[$songId]++;
 
@@ -765,6 +768,7 @@ class GeniusClient
                                 )
                                 ->withHeaders($this->geniusHeaders())
                                 ->withOptions(['cookies' => $this->cookieJar])
+                                ->withMiddleware(app(GeniusProxyProvider::class)->middleware())
                                 ->withRequestMiddleware(function ($request) use (&$attemptCounts, $key) {
                                     $attemptCounts[$key]++;
 
@@ -1194,7 +1198,11 @@ class GeniusClient
 
             $payload = $response->json();
 
-            return is_array($payload) ? $this->sanitizePayload($payload) : [];
+            if (! is_array($payload)) {
+                throw new RuntimeException('Genius API returned invalid JSON for '.$path);
+            }
+
+            return $this->sanitizePayload($payload);
         };
 
         try {
@@ -1237,6 +1245,7 @@ class GeniusClient
                     'Upgrade-Insecure-Requests' => '1',
                 ]))
                 ->withOptions(['cookies' => $this->cookieJar])
+                ->withMiddleware(app(GeniusProxyProvider::class)->middleware())
                 ->withRequestMiddleware(function ($request) use (&$attemptCount) {
                     $attemptCount++;
 
@@ -1413,7 +1422,8 @@ class GeniusClient
                 throw: false,
             )
             ->withHeaders($this->geniusHeaders())
-            ->withOptions(['cookies' => $this->cookieJar]);
+            ->withOptions(['cookies' => $this->cookieJar])
+            ->withMiddleware(app(GeniusProxyProvider::class)->middleware());
 
         if ($onAttempt !== null) {
             $request = $request->withRequestMiddleware(function ($pendingRequest) use ($onAttempt) {
@@ -1434,12 +1444,18 @@ class GeniusClient
      * @param  array<string, string>  $headers
      * @return array<string, string>
      */
-    private function geniusHeaders(array $headers = []): array
+    /** Headers shared by catalog requests and the proxy validation request. */
+    public static function defaultRequestHeaders(): array
     {
-        return array_merge([
+        return [
             'User-Agent' => self::USER_AGENT,
             'Accept-Language' => 'ru,en;q=0.9',
-        ], $headers);
+        ];
+    }
+
+    private function geniusHeaders(array $headers = []): array
+    {
+        return array_merge(self::defaultRequestHeaders(), $headers);
     }
 
     private function createCookieJar(string $seedCookie): CookieJar
@@ -1494,11 +1510,17 @@ class GeniusClient
 
     private function persistCookieJar(): void
     {
+        if (app(GeniusProxyProvider::class)->enabled()) {
+            return;
+        }
         Cache::put($this->cacheKey('cookie-jar'), $this->cookieJar->toArray(), self::COOKIE_JAR_CACHE_TTL);
     }
 
     private function shouldRetryRequest(\Throwable $exception): bool
     {
+        if (str_contains($exception->getMessage(), 'Genius proxy unavailable')) {
+            return false;
+        }
         if ($exception instanceof RequestException) {
             $status = $exception->response->status();
 

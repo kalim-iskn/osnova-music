@@ -6,6 +6,11 @@
         <meta name="csrf-token" content="{{ csrf_token() }}">
         <title inertia>{{ config('app.name', 'WaveFlow') }}</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+        <link rel="manifest" href="/site.webmanifest">
+        <link rel="apple-touch-icon" href="/icon-192.png">
+        <meta name="theme-color" content="#12171c">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         @vite(['resources/css/app.css', 'resources/js/app.js'])
         @inertiaHead
     </head>

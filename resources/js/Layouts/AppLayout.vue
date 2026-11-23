@@ -4,6 +4,7 @@ import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import SearchBox from '../Components/SearchBox.vue';
 import PlayerBar from '../Components/PlayerBar.vue';
 import AppIcon from '../Components/AppIcon.vue';
+import { OFFLINE_OWNER_KEY } from '../utils/offlineTracks';
 
 const page = usePage();
 
@@ -11,7 +12,6 @@ const appName = computed(() => page.props.appName ?? 'Музыка');
 const user = computed(() => page.props.auth?.user ?? null);
 const flashMessage = computed(() => page.props.flash?.message ?? null);
 const currentUrl = computed(() => page.url || '/');
-const isMobileMenuOpen = ref(false);
 const isProfileMenuOpen = ref(false);
 
 const navigation = [
@@ -22,6 +22,11 @@ const navigation = [
 ];
 
 const visibleNavigation = computed(() => navigation.filter((item) => !item.auth || user.value));
+const mobileNavigation = computed(() => [
+    { label: 'Главная', href: '/', icon: 'home' },
+    { label: 'Поиск', href: '/search', icon: 'search' },
+    { label: 'Коллекция', href: user.value ? '/library/tracks' : '/login', icon: 'queue' },
+]);
 
 const isActive = (href) => {
     if (href === '/') {
@@ -32,16 +37,7 @@ const isActive = (href) => {
 };
 
 const closeMenus = () => {
-    isMobileMenuOpen.value = false;
     isProfileMenuOpen.value = false;
-};
-
-const toggleMobileMenu = () => {
-    isMobileMenuOpen.value = !isMobileMenuOpen.value;
-
-    if (isMobileMenuOpen.value) {
-        isProfileMenuOpen.value = false;
-    }
 };
 
 const toggleProfileMenu = () => {
@@ -50,8 +46,14 @@ const toggleProfileMenu = () => {
 
 const logout = () => {
     closeMenus();
+    localStorage.removeItem(OFFLINE_OWNER_KEY);
     router.post('/logout');
 };
+
+watch(() => user.value?.id, (id) => {
+    if (id != null) localStorage.setItem(OFFLINE_OWNER_KEY, String(id));
+    else localStorage.removeItem(OFFLINE_OWNER_KEY);
+}, { immediate: true });
 
 watch(currentUrl, () => {
     closeMenus();
@@ -59,7 +61,7 @@ watch(currentUrl, () => {
 </script>
 
 <template>
-    <div class="app-shell">
+    <div class="app-shell montage-app">
         <Head />
 
         <div class="ambient ambient-left"></div>
@@ -93,7 +95,7 @@ watch(currentUrl, () => {
                     <div class="header-actions header-actions--desktop">
                         <template v-if="user">
                             <div class="profile-menu" :class="{ 'profile-menu--open': isProfileMenuOpen }">
-                                <button class="profile-menu__trigger" type="button" @click="toggleProfileMenu">
+                                <button class="profile-menu__trigger" type="button" :aria-expanded="isProfileMenuOpen" aria-label="Меню аккаунта" @click="toggleProfileMenu" @keydown.esc="closeMenus">
                                     <span class="user-chip__avatar" :aria-label="`Профиль: ${user.name}`">
                                         {{ user.name.slice(0, 1).toUpperCase() }}
                                     </span>
@@ -106,6 +108,7 @@ watch(currentUrl, () => {
                                         <small>{{ user.email }}</small>
                                     </div>
 
+                                    <Link href="/tools/parsing" class="profile-menu__link profile-menu__parsing" @click="closeMenus">Парсинг</Link>
                                     <button class="profile-menu__link profile-menu__link--button" type="button" @click="logout">
                                         Выйти
                                     </button>
@@ -119,61 +122,7 @@ watch(currentUrl, () => {
                         </template>
                     </div>
 
-                    <div class="header-actions-mobile">
-                        <template v-if="!user">
-                            <Link href="/login" class="ghost-button ghost-button--small header-actions-mobile__auth">Войти</Link>
-                            <Link href="/register" class="primary-button primary-button--small header-actions-mobile__auth">Регистрация</Link>
-                        </template>
-
-                        <button class="icon-button mobile-menu-toggle" type="button" :aria-label="isMobileMenuOpen ? 'Закрыть меню' : 'Открыть меню'" @click="toggleMobileMenu">
-                            <AppIcon :name="isMobileMenuOpen ? 'close' : 'menu'" :size="20" />
-                        </button>
-                    </div>
                 </div>
-
-                <div class="site-header__mobile-search">
-                    <SearchBox :initial-query="page.props.term ?? ''" class="site-search" />
-                </div>
-
-                <transition name="fade">
-                    <div v-if="isMobileMenuOpen" class="mobile-menu">
-                        <nav class="mobile-menu__nav">
-                            <Link
-                                v-for="item in visibleNavigation"
-                                :key="item.href"
-                                :href="item.href"
-                                class="mobile-menu__link"
-                                :class="{ 'mobile-menu__link--active': isActive(item.href) }"
-                                @click="closeMenus"
-                            >
-                                {{ item.label }}
-                            </Link>
-                        </nav>
-
-                        <div class="mobile-menu__footer">
-                            <template v-if="user">
-                                <div class="mobile-menu__profile">
-                                    <span class="user-chip__avatar">{{ user.name.slice(0, 1).toUpperCase() }}</span>
-                                    <div class="mobile-menu__profile-meta">
-                                        <strong>{{ user.name }}</strong>
-                                        <small>{{ user.email }}</small>
-                                    </div>
-                                </div>
-
-                                <button class="ghost-button ghost-button--small mobile-menu__logout" type="button" @click="logout">
-                                    Выйти
-                                </button>
-                            </template>
-
-                            <template v-else>
-                                <div class="mobile-menu__auth">
-                                    <Link href="/login" class="ghost-button ghost-button--small" @click="closeMenus">Войти</Link>
-                                    <Link href="/register" class="primary-button primary-button--small" @click="closeMenus">Регистрация</Link>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </transition>
             </div>
         </header>
 
@@ -186,5 +135,8 @@ watch(currentUrl, () => {
         </main>
 
         <PlayerBar />
+        <nav class="mobile-bottom-nav" aria-label="Основные разделы">
+            <Link v-for="item in mobileNavigation" :key="item.href" :href="item.href" :aria-current="isActive(item.href) ? 'page' : undefined"><AppIcon :name="item.icon" :size="20" />{{ item.label }}</Link>
+        </nav>
     </div>
 </template>

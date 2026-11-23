@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { paletteFromPixels, artworkPalette } from '../resources/js/utils/artworkPalette.js';
+const pixels = (...colors) => Uint8ClampedArray.from(colors.flat());
+assert.deepEqual(paletteFromPixels(pixels([0,0,0,255], [255,255,255,255], [130,130,130,255])), ['#e7ebf5','#f3f1f8']);
+assert.match(paletteFromPixels(pixels([220,30,30,255]))[0], /^hsl\(7 /);
+const blueGold = paletteFromPixels(pixels([30,60,220,255], [230,160,25,255]));
+assert.match(blueGold[0], /^hsl\(/);
+assert.notEqual(blueGold[0].split(' ')[0], blueGold[1].split(' ')[0]);
+assert.deepEqual(paletteFromPixels(new Uint8ClampedArray()), ['#e7ebf5','#f3f1f8']);
+assert.equal(await artworkPalette(null), null);
+console.log('Artwork chroma selection, contrasting hues and neutral fallback passed.');

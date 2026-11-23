@@ -14,6 +14,7 @@ const props = defineProps({
         type: Number,
         default: 18,
     },
+    showLabel: { type: Boolean, default: false },
 });
 
 const normalizedNetwork = computed(() => String(props.network || '').trim().toLowerCase());
@@ -144,6 +145,7 @@ const title = computed(() => {
             <circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" />
             <path d="M3.8 12H20.2M12 3.8C14.2 6.1 15.4 9 15.4 12C15.4 15 14.2 17.9 12 20.2C9.8 17.9 8.6 15 8.6 12C8.6 9 9.8 6.1 12 3.8Z" stroke="currentColor" stroke-width="1.5" />
         </svg>
+        <span v-if="showLabel">{{ title }}</span>
     </a>
 </template>
 
@@ -152,20 +154,22 @@ const title = computed(() => {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 999px;
-    color: rgba(255, 255, 255, 0.82);
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 2.25rem;
+    min-height: 2.5rem;
+    gap: 7px;
+    padding: 4px 6px;
+    border-radius: 5px;
+    color: #676173;
+    background: transparent;
+    border: 0;
+    font-size: 12px;
     text-decoration: none;
     transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
 }
 
 .social-icon-link:hover {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.18);
+    color: #393043;
+    background: #f4f1f9;
     transform: translateY(-1px);
 }
 </style>

@@ -7,6 +7,7 @@ const props = defineProps({
         type: Object,
         default: null,
     },
+    itemLabel: { type: String, default: 'треков' },
 });
 
 const meta = computed(() => props.pagination?.meta ?? null);
@@ -18,7 +19,7 @@ const hasPagination = computed(() => Boolean(meta.value && (meta.value.last_page
     <div v-if="hasPagination" class="pagination-bar">
         <div class="pagination-bar__meta">
             <span>Страница {{ meta.current_page }} из {{ meta.last_page }}</span>
-            <span>{{ meta.total }} треков</span>
+            <span>{{ meta.total }} {{ itemLabel }}</span>
         </div>
 
         <div class="pagination-bar__actions">

@@ -19,6 +19,21 @@ services:
       # быстрый vendor для PHP (vendor copy в windows: docker cp work_project_php:/opt/app/vendor ./vendor)
       - vendor_data:/var/www/html/vendor
       - ./docker/supervisor/supervisord.conf:/etc/supervisor.d/supervisord.ini:ro
+    networks:
+      - default
+      - proxy_sources_private
+
+  proxy-source-fetch:
+    container_name: waveflow-proxy-source-fetch
+    build:
+      context: ./docker/proxy-source-fetch
+    environment:
+      FETCH_BIND: 10.254.252.2
+    restart: unless-stopped
+    networks:
+      proxy_sources_private:
+        ipv4_address: 10.254.252.2
+      proxy_sources_outbound: {}
 
   db:
     container_name: waveflow-db
@@ -50,3 +65,14 @@ networks:
     ipam:
       config:
         - subnet: 10.254.254.0/24
+  proxy_sources_private:
+    name: waveflow_proxy_sources_private
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.252.0/24
+  proxy_sources_outbound:
+    name: waveflow_proxy_sources_outbound
+    ipam:
+      config:
+        - subnet: 10.254.253.0/24

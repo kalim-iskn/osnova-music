@@ -2,12 +2,16 @@
 import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import MusicHero from '../../Components/MusicHero.vue';
+import MusicDescription from '../../Components/MusicDescription.vue';
+import AppIcon from '../../Components/AppIcon.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
-import SocialIconLink from '../../Components/SocialIconLink.vue';
+import ArtistSocialLinks from '../../Components/ArtistSocialLinks.vue';
+import GeniusSource from '../../Components/GeniusSource.vue';
+import ReleaseCard from '../../Components/ReleaseCard.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { usePlayerStore } from '../../stores/player';
 import { formatCount, formatNumberedCount } from '../../utils/pluralize';
-import { formatAlbumReleaseDate } from '../../utils/releaseDate';
 
 defineOptions({ layout: AppLayout });
 
@@ -60,42 +64,13 @@ onMounted(fetchRuntime);
 <template>
     <Head :title="artist.name" />
 
-    <section class="hero-card hero-card--artist artist-page__hero-card">
-        <img :src="artist.image_url" :alt="artist.name" class="hero-card__avatar artist-page__hero-cover" role="button" tabindex="0" @click="toggleArtistPlayback" @keydown.enter.prevent="toggleArtistPlayback" @keydown.space.prevent="toggleArtistPlayback">
+    <MusicHero :title="artist.name" label="Исполнитель" :cover="artist.image_url" portrait :playing="isArtistPlaying" :disabled="!firstTrack" @play="toggleArtistPlayback">
+        <template #meta><span>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }} в каталоге</span><span>·</span><span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span></template>
+        <template #actions><button class="primary-button" type="button" :disabled="!firstTrack" @click="toggleArtistPlayback"><AppIcon :name="isArtistPlaying ? 'pause' : 'play'" :size="18" />{{ isArtistPlaying ? 'Пауза' : 'Слушать исполнителя' }}</button></template>
+    </MusicHero>
+    <div class="music-divider"><span>Музыка исполнителя</span><a href="#artist-about">Об исполнителе ↘</a></div>
 
-        <div class="artist-page__hero-body">
-            <span class="eyebrow">Исполнитель</span>
-            <h1>{{ artist.name }}</h1>
-            <p class="hero-card__description hero-card__description--stacked">
-                <span>{{ formatCount(artist.tracks_count, ['трек', 'трека', 'треков']) }} в каталоге.</span>
-                <span>{{ formatNumberedCount(artist.plays_count, ['прослушивание', 'прослушивания', 'прослушиваний']) }}</span>
-            </p>
-
-            <p v-if="artistDescription" class="hero-card__description hero-card__description--text">
-                {{ artistDescription }}
-            </p>
-
-            <button
-                type="button"
-                class="artist-page__play-button"
-                :disabled="!firstTrack"
-                @click="toggleArtistPlayback"
-            >
-                {{ isArtistPlaying ? 'Стоп' : 'Слушать исполнителя' }}
-            </button>
-
-            <div v-if="Object.keys(artistSocialLinks).length" class="artist-page__socials">
-                <SocialIconLink
-                    v-for="(value, key) in artistSocialLinks"
-                    :key="key"
-                    :network="key"
-                    :value="value"
-                />
-            </div>
-        </div>
-    </section>
-
-    <section class="section-grid">
+    <section class="artist-music">
         <div class="artist-page__section">
             <div class="section-heading section-heading--tight">
                 <h2>Треки исполнителя</h2>
@@ -121,22 +96,16 @@ onMounted(fetchRuntime);
 
         <div class="artist-page__section">
             <div class="section-heading section-heading--tight">
-                <h2>Альбомы</h2>
+                <h2>Релизы</h2>
                 <span class="badge">{{ albums.length }}</span>
             </div>
 
             <div class="album-grid album-grid--compact">
-                <Link v-for="album in albums" :key="album.id" :href="`/albums/${album.slug}`" class="album-card">
-                    <img :src="album.cover_image_url" :alt="album.title" class="album-card__cover">
-
-                    <div class="album-card__body">
-                        <strong>{{ album.title }}</strong>
-                        <small>{{ formatAlbumReleaseDate(album) ?? 'Дата релиза уточняется' }}</small>
-                    </div>
-                </Link>
+                <ReleaseCard v-for="album in albums" :key="album.id" :album="album" show-date />
             </div>
         </div>
     </section>
+    <section id="artist-about" class="music-info-grid"><div><div class="section-heading"><h2>Об исполнителе</h2></div><MusicDescription v-if="artistDescription" :text="artistDescription" /><p v-else class="section-description">Описание исполнителя пока не добавлено.</p><GeniusSource :href="runtime?.artist?.url" /></div><div><div class="section-heading"><h2>На других площадках</h2></div><ArtistSocialLinks :links="artistSocialLinks" /><p v-if="!Object.keys(artistSocialLinks).length" class="section-description">Ссылки пока не добавлены.</p></div></section>
 </template>
 
 <style scoped>

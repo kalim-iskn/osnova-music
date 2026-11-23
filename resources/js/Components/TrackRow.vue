@@ -9,6 +9,7 @@ import MarqueeText from './MarqueeText.vue';
 import TrackActionsMenu from './TrackActionsMenu.vue';
 
 const props = defineProps({
+    queueLoader: { type: Function, default: null },
     track: {
         type: Object,
         required: true,
@@ -44,7 +45,12 @@ const toggleTrack = async () => {
         return;
     }
 
-    await player.playTrack(props.track, props.queue.length ? props.queue : [props.track]);
+    try {
+        const queue = props.queueLoader ? await props.queueLoader() : props.queue;
+        await player.playTrack(props.track, queue.length ? queue : [props.track]);
+    } catch {
+        window.alert('Не удалось открыть очередь. Попробуйте ещё раз.');
+    }
 };
 
 </script>
@@ -73,9 +79,10 @@ const toggleTrack = async () => {
 
                 <template v-if="showAlbum && track.album">
                     <span v-if="showArtist" class="track-row__separator">•</span>
-                    <Link :href="`/albums/${track.album.slug}`" @click.stop>
+                    <Link v-if="track.album.slug" :href="`/albums/${track.album.slug}`" @click.stop>
                         {{ track.album.title }}
                     </Link>
+                    <span v-else>{{ track.album.title }}</span>
                 </template>
             </MarqueeText>
             <MarqueeText v-if="track.is_playable === false" class="track-row__meta">Аудио пока недоступно</MarqueeText>
@@ -83,6 +90,7 @@ const toggleTrack = async () => {
 
         <div class="track-row__actions">
             <div class="track-row__buttons">
+                <slot name="before-actions" :track="track" />
                 <LikeButton :track-id="track.id" icon-only @changed="(value) => emit('like-changed', value)" />
                 <TrackActionsMenu :track="track" />
             </div>

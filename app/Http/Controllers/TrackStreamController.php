@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Track;
 use GuzzleHttp\Client;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -13,7 +14,7 @@ use Throwable;
 
 class TrackStreamController extends Controller
 {
-    public function __invoke(Track $track): BinaryFileResponse|StreamedResponse|RedirectResponse
+    public function __invoke(Track $track, Request $request): BinaryFileResponse|StreamedResponse|RedirectResponse
     {
         $source = trim((string) $track->audio_url);
 
@@ -29,13 +30,21 @@ class TrackStreamController extends Controller
         abort_unless(filter_var($source, FILTER_VALIDATE_URL), 404);
 
         try {
+            $headers = $this->requestHeadersFor($source);
+            if ($request->headers->has('Range')) {
+                $headers['Range'] = $request->header('Range');
+            }
+            if ($request->headers->has('If-Range')) {
+                $headers['If-Range'] = $request->header('If-Range');
+            }
+
             $client = new Client([
                 'timeout' => 90,
                 'verify' => false,
                 'allow_redirects' => true,
                 'http_errors' => false,
                 'stream' => true,
-                'headers' => $this->requestHeadersFor($source),
+                'headers' => $headers,
             ]);
 
             $upstream = $client->request('GET', $source);
@@ -51,10 +60,11 @@ class TrackStreamController extends Controller
                     echo $body->read(8192);
                     flush();
                 }
-            }, 200, array_filter([
+            }, $upstream->getStatusCode() === 206 ? 206 : 200, array_filter([
                 'Content-Type' => $upstream->getHeaderLine('Content-Type') ?: 'audio/mpeg',
                 'Content-Length' => $upstream->getHeaderLine('Content-Length') ?: null,
-                'Accept-Ranges' => $upstream->getHeaderLine('Accept-Ranges') ?: 'bytes',
+                'Content-Range' => $upstream->getHeaderLine('Content-Range') ?: null,
+                'Accept-Ranges' => $upstream->getHeaderLine('Accept-Ranges') ?: null,
                 'Cache-Control' => 'public, max-age=1800',
             ]));
         } catch (Throwable) {

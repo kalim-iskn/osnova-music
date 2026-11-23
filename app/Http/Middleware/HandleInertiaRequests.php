@@ -2,7 +2,6 @@
 
 namespace App\Http\Middleware;
 
-use Closure;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -26,6 +25,7 @@ class HandleInertiaRequests extends Middleware
                         'name' => $request->user()->name,
                         'email' => $request->user()->email,
                         'liked_track_ids' => $request->user()->likedTracks()->pluck('tracks.id')->all(),
+                        'liked_album_ids' => $request->user()->likedAlbums()->pluck('albums.id')->all(),
                     ]
                     : null,
             ],

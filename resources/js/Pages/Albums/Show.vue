@@ -2,6 +2,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { Head, Link } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import MusicHero from '../../Components/MusicHero.vue';
+import MusicDescription from '../../Components/MusicDescription.vue';
+import GeniusSource from '../../Components/GeniusSource.vue';
+import LikeButton from '../../Components/LikeButton.vue';
+import AppIcon from '../../Components/AppIcon.vue';
 import PaginationBar from '../../Components/PaginationBar.vue';
 import TrackRow from '../../Components/TrackRow.vue';
 import { usePlayerStore } from '../../stores/player';
@@ -63,41 +68,11 @@ onMounted(fetchRuntime);
 <template>
     <Head :title="album.title" />
 
-    <section class="hero-card hero-card--album album-page__hero-card">
-        <img :src="runtime?.album?.cover_image_url ?? album.cover_image_url" :alt="album.title" class="hero-card__album-cover album-page__hero-cover" role="button" tabindex="0" @click="toggleAlbumPlayback" @keydown.enter.prevent="toggleAlbumPlayback" @keydown.space.prevent="toggleAlbumPlayback">
-
-        <div class="album-page__hero-body">
-            <span v-if="releaseTypeLabel" class="eyebrow">{{ releaseTypeLabel }}</span>
-            <h1>{{ album.title }}</h1>
-
-            <p class="hero-card__description album-page__artists-row">
-                <template v-for="(artist, index) in albumArtists" :key="artist.id ?? artist.slug ?? artist.name ?? index">
-                    <span v-if="index" class="hero-card__separator">•</span>
-                    <Link v-if="artist.slug" :href="`/artists/${artist.slug}`">{{ artist.name }}</Link>
-                    <span v-else>{{ artist.name }}</span>
-                </template>
-                <span class="hero-card__separator">•</span>
-                <span>{{ formatCount(album.tracks_count, ['трек', 'трека', 'треков']) }}</span>
-                <template v-if="displayReleaseDate">
-                    <span class="hero-card__separator">•</span>
-                    <span>{{ displayReleaseDate }}</span>
-                </template>
-            </p>
-
-            <p v-if="albumDescription" class="hero-card__description hero-card__description--text">
-                {{ albumDescription }}
-            </p>
-
-            <button
-                type="button"
-                class="album-page__play-button"
-                :disabled="!firstTrack"
-                @click="toggleAlbumPlayback"
-            >
-                {{ isAlbumPlaying ? 'Стоп' : 'Слушать альбом' }}
-            </button>
-        </div>
-    </section>
+    <MusicHero :title="album.title" :label="releaseTypeLabel ?? 'Релиз'" :cover="runtime?.album?.cover_image_url ?? album.cover_image_url" :playing="isAlbumPlaying" :disabled="!firstTrack" @play="toggleAlbumPlayback">
+        <template #meta><template v-for="(artist, index) in albumArtists" :key="artist.id ?? index"><span v-if="index">&amp;</span><Link v-if="artist.slug" :href="`/artists/${artist.slug}`">{{ artist.name }}</Link><span v-else>{{ artist.name }}</span></template><span>·</span><span>{{ formatCount(album.tracks_count, ['трек', 'трека', 'треков']) }}</span></template>
+        <template #tags><span v-if="displayReleaseDate">{{ displayReleaseDate }}</span></template>
+        <template #actions><button class="primary-button" type="button" :disabled="!firstTrack" @click="toggleAlbumPlayback"><AppIcon :name="isAlbumPlaying ? 'pause' : 'play'" :size="18" />{{ isAlbumPlaying ? 'Пауза' : 'Слушать релиз' }}</button><LikeButton :album="album" icon-only /></template>
+    </MusicHero>
 
     <section class="section-block">
         <div class="section-heading section-heading--tight">
@@ -121,6 +96,18 @@ onMounted(fetchRuntime);
         </p>
 
         <PaginationBar :pagination="pagination" />
+    </section>
+    <section v-if="albumDescription" class="music-info-grid release-about">
+        <div><div class="section-heading"><h2>О релизе</h2></div><MusicDescription :text="albumDescription" /></div>
+        <aside class="release-about__facts" aria-label="Сведения о релизе">
+            <dl>
+                <div v-if="albumArtists.length"><dt>Исполнители</dt><dd><template v-for="(artist, index) in albumArtists" :key="artist.id ?? index"><span v-if="index">, </span><Link v-if="artist.slug" :href="`/artists/${artist.slug}`">{{ artist.name }}</Link><span v-else>{{ artist.name }}</span></template></dd></div>
+                <div v-if="releaseTypeLabel"><dt>Формат</dt><dd>{{ releaseTypeLabel }}</dd></div>
+                <div v-if="displayReleaseDate"><dt>Дата выхода</dt><dd>{{ displayReleaseDate }}</dd></div>
+                <div><dt>В релизе</dt><dd>{{ formatCount(album.tracks_count, ['трек', 'трека', 'треков']) }}</dd></div>
+            </dl>
+            <GeniusSource :href="runtime?.album?.url" />
+        </aside>
     </section>
 </template>
 

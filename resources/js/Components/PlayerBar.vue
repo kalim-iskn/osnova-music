@@ -9,6 +9,7 @@ import PlayerQueueList from './PlayerQueueList.vue';
 import TrackArtists from './TrackArtists.vue';
 import AppIcon from './AppIcon.vue';
 import PlayerSeekBar from './PlayerSeekBar.vue';
+import { offlineMediaUrl } from '../utils/offlineTracks';
 
 const audioRef = ref(null);
 const mobilePlayerScrollRef = ref(null);
@@ -31,6 +32,8 @@ let suppressMobileSheetClick = false;
 
 onMounted(() => {
     player.attach(audioRef.value);
+    installMediaSession();
+    updateMediaMetadata();
 
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
         return;
@@ -57,6 +60,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    clearMediaSession();
     detachViewportListener?.();
     detachPointerSheetListeners();
     window.clearTimeout(mobileSheetTimer);
@@ -143,7 +147,7 @@ const canStartMobileSheetGesture = (target) => {
         return false;
     }
 
-    return !target?.closest?.('button, input, .queue-item__handle');
+    return !target?.closest?.('button, input, .queue-item');
 };
 
 const startMobileSheetGesture = (clientX, clientY, target) => {
@@ -310,6 +314,73 @@ const scrollQueueIntoView = () => {
     });
 };
 
+const mediaActions = ['play', 'pause', 'stop', 'previoustrack', 'nexttrack', 'seekto', 'seekbackward', 'seekforward'];
+const mediaSession = () => typeof navigator !== 'undefined' ? navigator.mediaSession : null;
+
+const setMediaAction = (action, handler) => {
+    try { mediaSession()?.setActionHandler(action, handler); } catch { /* Unsupported on this iOS version. */ }
+};
+
+const installMediaSession = () => {
+    if (!mediaSession()) return;
+    setMediaAction('play', () => { if (audioRef.value?.paused) void player.togglePlayback(); });
+    setMediaAction('pause', () => { if (!audioRef.value?.paused) void player.togglePlayback(); });
+    setMediaAction('stop', () => { audioRef.value?.pause(); player.seekTo(0); });
+    setMediaAction('nexttrack', () => { void player.playNext(); });
+    setMediaAction('previoustrack', () => { void player.playPrevious(); });
+    setMediaAction('seekto', (details) => {
+        if (Number.isFinite(details.seekTime)) player.seekTo(details.seekTime);
+    });
+    // Some systems otherwise show 15-second skipping instead of track navigation.
+    setMediaAction('seekbackward', null);
+    setMediaAction('seekforward', null);
+};
+
+const updateMediaMetadata = () => {
+    const session = mediaSession();
+    if (!session || typeof MediaMetadata === 'undefined') return;
+    const track = currentTrack.value;
+    if (!track) {
+        session.metadata = null;
+        return;
+    }
+    const ownerId = player.offlineOwnerId;
+    const hasLocalArtwork = ownerId && player.offlineArtworkIds.includes(track.id) && navigator.serviceWorker?.controller;
+    const cover = hasLocalArtwork ? offlineMediaUrl(ownerId, track.id, 'artwork') : (track.cover_image_url || '/icon-512.png');
+    const artwork = cover ? [{ src: new URL(cover, window.location.href).href }] : [];
+    session.metadata = new MediaMetadata({
+        title: track.title || 'Без названия',
+        artist: track.artists?.map((artist) => artist.name).join(', ') || track.artist?.name || '',
+        album: track.album?.title || '',
+        artwork,
+    });
+};
+
+const updateMediaPosition = () => {
+    const session = mediaSession();
+    const duration = Number(player.duration || currentTrack.value?.duration_seconds || 0);
+    if (!session || !session.setPositionState || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+        session.setPositionState({ duration, playbackRate: 1, position: Math.max(0, Math.min(duration, player.currentTime)) });
+    } catch { /* WebKit can reject position changes during metadata loading. */ }
+};
+
+const clearMediaSession = () => {
+    if (!mediaSession()) return;
+    mediaActions.forEach((action) => setMediaAction(action, null));
+    mediaSession().metadata = null;
+    mediaSession().playbackState = 'none';
+};
+
+watch([currentTrack, () => player.offlineArtworkIds], () => {
+    updateMediaMetadata();
+    updateMediaPosition();
+});
+watch([() => player.currentTime, () => player.duration], updateMediaPosition);
+watch(() => player.isPlaying, (playing) => {
+    if (mediaSession()) mediaSession().playbackState = currentTrack.value ? (playing ? 'playing' : 'paused') : 'none';
+});
+
 watch(currentTrack, (track) => {
     if (!track) {
         closeMobilePlayer();
@@ -363,7 +434,8 @@ watch(isMobilePlayerOpen, (isOpen) => {
 
                                 <template v-if="currentTrack.album">
                                     <span class="player-bar__separator">•</span>
-                                    <Link :href="`/albums/${currentTrack.album.slug}`">{{ currentTrack.album.title }}</Link>
+                                    <Link v-if="currentTrack.album.slug" :href="`/albums/${currentTrack.album.slug}`">{{ currentTrack.album.title }}</Link>
+                                    <span v-else>{{ currentTrack.album.title }}</span>
                                 </template>
                             </div>
                         </div>
@@ -530,9 +602,10 @@ watch(isMobilePlayerOpen, (isOpen) => {
                                 <TrackArtists :track="currentTrack" />
                             </div>
 
-                            <Link v-if="currentTrack.album" :href="`/albums/${currentTrack.album.slug}`" class="mobile-player__album-link" @click="closeMobilePlayer">
+                            <Link v-if="currentTrack.album?.slug" :href="`/albums/${currentTrack.album.slug}`" class="mobile-player__album-link" @click="closeMobilePlayer">
                                 {{ currentTrack.album.title }}
                             </Link>
+                            <span v-else-if="currentTrack.album" class="mobile-player__album-link">{{ currentTrack.album.title }}</span>
                         </div>
                     </div>
 
@@ -880,6 +953,7 @@ watch(isMobilePlayerOpen, (isOpen) => {
 }
 
 @media (max-width: 900px) {
+    .player-bar__edge-seek { display: none; }
     .player-bar {
         padding-top: 2px;
         border-radius: 0;
